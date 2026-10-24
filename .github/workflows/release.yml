@@ -1,0 +1,161 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Build GUI (Windows)
+        working-directory: ./GUI
+        run: cargo build --release --target x86_64-pc-windows-msvc
+
+      - name: Package Windows
+        run: |
+          mkdir -p release/codex-setup-gui-windows
+          cp GUI/target/x86_64-pc-windows-msvc/release/codex-setup-gui.exe release/codex-setup-gui-windows/
+          cp GUI/launch.bat release/codex-setup-gui-windows/
+          cp -r Windows release/codex-setup-gui-windows/
+          cp -r Linux release/codex-setup-gui-windows/
+          cp LICENSE release/codex-setup-gui-windows/
+          cp README.md release/codex-setup-gui-windows/
+
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-setup-gui-windows
+          path: release/codex-setup-gui-windows/
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1-mesa-dev libgl1-mesa-dev libx11-dev libxi-dev libxrandr-dev pkg-config
+
+      - name: Build GUI (Linux)
+        working-directory: ./GUI
+        run: cargo build --release --target x86_64-unknown-linux-gnu
+        env:
+          PKG_CONFIG_PATH: /usr/lib/pkgconfig
+
+      - name: Package Linux
+        run: |
+          mkdir -p release/codex-setup-gui-linux
+          cp GUI/target/x86_64-unknown-linux-gnu/release/codex-setup-gui release/codex-setup-gui-linux/
+          cp GUI/launch.sh release/codex-setup-gui-linux/
+          chmod +x release/codex-setup-gui-linux/launch.sh
+          chmod +x release/codex-setup-gui-linux/codex-setup-gui
+          cp -r Windows release/codex-setup-gui-linux/
+          cp -r Linux release/codex-setup-gui-linux/
+          cp LICENSE release/codex-setup-gui-linux/
+          cp README.md release/codex-setup-gui-linux/
+
+      - name: Upload Linux Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-setup-gui-linux
+          path: release/codex-setup-gui-linux/
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin
+
+      - name: Build GUI (macOS)
+        working-directory: ./GUI
+        run: cargo build --release --target x86_64-apple-darwin
+
+      - name: Package macOS
+        run: |
+          mkdir -p release/codex-setup-gui-macos
+          cp GUI/target/x86_64-apple-darwin/release/codex-setup-gui release/codex-setup-gui-macos/
+          cp GUI/launch.sh release/codex-setup-gui-macos/
+          chmod +x release/codex-setup-gui-macos/launch.sh
+          chmod +x release/codex-setup-gui-macos/codex-setup-gui
+          cp -r Windows release/codex-setup-gui-macos/
+          cp -r Linux release/codex-setup-gui-macos/
+          cp LICENSE release/codex-setup-gui-macos/
+          cp README.md release/codex-setup-gui-macos/
+
+      - name: Upload macOS Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-setup-gui-macos
+          path: release/codex-setup-gui-macos/
+
+  release:
+    needs: [build-windows, build-linux, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Create Release Archives
+        run: |
+          cd artifacts
+          zip -r codex-setup-gui-windows.zip codex-setup-gui-windows/
+          zip -r codex-setup-gui-linux.zip codex-setup-gui-linux/
+          zip -r codex-setup-gui-macos.zip codex-setup-gui-macos/
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          body: |
+            ## Codex Setup GUI ${{ github.ref_name }}
+
+            ### 下载地址
+            - Windows: `codex-setup-gui-windows.zip` (双击 `launch.bat` 启动)
+            - Linux: `codex-setup-gui-linux.zip` (运行 `./launch.sh` 启动)
+            - macOS: `codex-setup-gui-macos.zip` (运行 `./launch.sh` 启动)
+
+            ### 包含内容
+            - GUI 程序（Rust + egui）
+            - Windows PowerShell 脚本（7 个平台）
+            - Linux/macOS Bash 脚本（7 个平台 + 公共库）
+            - LICENSE 和 README
+          files: |
+            artifacts/codex-setup-gui-windows.zip
+            artifacts/codex-setup-gui-linux.zip
+            artifacts/codex-setup-gui-macos.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

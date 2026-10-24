@@ -4,6 +4,9 @@
 // 本程序由 AI 辅助开发，基于 DeepSeek 一键安装命令修改而来
 // 但程序架构和实现均为自行开发。
 
+// Windows: 隐藏控制台窗口（GUI 应用不显示 cmd 窗口）
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+
 use eframe::egui;
 use std::process::Command;
 use std::sync::mpsc;
@@ -301,18 +304,19 @@ impl eframe::App for CodexSetupApp {
             ui.separator();
 
             // 日志输出
-            ui.collapsing("📋 安装日志", |ui| {
-                egui::ScrollArea::vertical()
-                    .max_height(250.0)
-                    .stick_to_bottom(true)
-                    .show(ui, |ui| {
-                        egui::TextEdit::multiline(&mut self.log.clone())
-                            .font(egui::TextStyle::Monospace)
-                            .desired_width(f32::INFINITY)
-                            .interactive(false)
-                            .show(ui);
-                    });
-            });
+            ui.separator();
+            ui.label("📋 安装日志");
+            egui::ScrollArea::vertical()
+                .max_height(250.0)
+                .stick_to_bottom(true)
+                .show(ui, |ui| {
+                    let mut log_text = self.log.clone();
+                    egui::TextEdit::multiline(&mut log_text)
+                        .font(egui::TextStyle::Monospace)
+                        .desired_width(f32::INFINITY)
+                        .interactive(false)
+                        .show(ui);
+                });
 
             ui.separator();
 
