@@ -466,11 +466,64 @@ enabled-reasoning-efforts = ["low", "medium", "high", "xhigh", "ultra", "max"]
     Ok(())
 }
 
-/// egui 动画支持（简化版）
+/// egui 字体配置（支持中文）
 mod egui_animation {
     use egui;
 
     pub fn setup(ctx: &egui::Context) {
         ctx.set_visuals(egui::Visuals::dark());
+
+        // 配置中文字体
+        let mut fonts = egui::FontDefinitions::default();
+
+        // 尝试加载系统 CJK 字体
+        let cjk_font_paths = [
+            // Windows
+            "C:\\Windows\\Fonts\\msyh.ttc",      // Microsoft YaHei
+            "C:\\Windows\\Fonts\\msyhbd.ttc",    // Microsoft YaHei Bold
+            "C:\\Windows\\Fonts\\simsun.ttc",    // SimSun
+            "C:\\Windows\\Fonts\\simhei.ttf",    // SimHei
+            // macOS
+            "/System/Library/Fonts/PingFang.ttc",
+            "/System/Library/Fonts/STHeiti Light.ttc",
+            "/Library/Fonts/Arial Unicode.ttf",
+            // Linux
+            "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+            "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        ];
+
+        let mut font_loaded = false;
+        for path in &cjk_font_paths {
+            if std::path::Path::new(path).exists() {
+                if let Ok(font_data) = std::fs::read(path) {
+                    fonts.font_data.insert(
+                        "cjk_font".to_owned(),
+                        egui::FontData::from_owned(font_data),
+                    );
+                    // 将 CJK 字体放在最前面作为首选
+                    fonts
+                        .families
+                        .get_mut(&egui::FontFamily::Proportional)
+                        .unwrap()
+                        .insert(0, "cjk_font".to_owned());
+                    fonts
+                        .families
+                        .get_mut(&egui::FontFamily::Monospace)
+                        .unwrap()
+                        .insert(0, "cjk_font".to_owned());
+                    font_loaded = true;
+                    break;
+                }
+            }
+        }
+
+        if !font_loaded {
+            // 尝试加载嵌入的备用字体（使用 egui 内置的叉号字体作为 fallback）
+            // 注意：如果需要完整 CJK 支持，需要嵌入一个 CJK 字体文件
+        }
+
+        ctx.set_fonts(fonts);
     }
 }
