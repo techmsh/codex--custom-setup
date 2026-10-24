@@ -1,0 +1,17 @@
+# Set default behavior to automatically normalize line endings
+* text=auto
+
+# Declare files that should always have LF line endings on checkout
+*.sh text eol=lf
+*.ps1 text eol=lf
+
+# Declare files that should retain CRLF line endings
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Denote files that are truly binary and should not be modified
+*.exe binary
+*.dll binary
+*.rlib binary
+*.rmeta binary
+*.d binary

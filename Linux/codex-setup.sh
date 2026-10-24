@@ -15,6 +15,10 @@ set -euo pipefail
 
 SCRIPT_VERSION="1.0.0"
 
+# Ensure UTF-8 encoding for Chinese / international character support
+export LANG="${LANG:-en_US.UTF-8}"
+export LC_ALL="${LC_ALL:-en_US.UTF-8"}
+
 # ---------------------------------------------------------------- color helpers
 
 if [[ -t 1 ]]; then

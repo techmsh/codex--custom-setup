@@ -21,6 +21,14 @@
 # SOFTWARE.
 #
 
+# Set output encoding to match system locale for proper character display
+if ($PSVersionTable.PSVersion.Major -ge 7) {
+    [System.Text.Encoding]::GetEncoding('utf-8')
+} else {
+    $OutputEncoding = [System.Text.Encoding]::GetEncoding('utf-8')
+    [Console]::OutputEncoding = [System.Text.Encoding]::GetEncoding('utf-8')
+}
+
 <#
 Codex LongCat Setup -- configuration manager (Windows)
 
@@ -46,9 +54,20 @@ $ModelCatalog        = [ordered]@{
     'LongCat-OmniFlash'    = @{ Display = 'LongCat-OmniFlash';    Description = 'Omni-modal fast model with image support';      SupportsSearch = $true;  SupportsImage = $true;  ContextWindow = 1048576 }
 }
 $script:ModelSlug    = ''   # decided by the menu choice
-$PROVIDER_ID         = 'longcat'
-$DEFAULT_BASE_URL    = 'https://api.longcat.chat/openai/v1/'
-$BACKUP_DIRNAME      = 'backup-longcat'
+# Set output encoding to match system locale for proper character display
+if ($PSVersionTable.PSVersion.Major -ge 7) {
+    [System.Text.Encoding]::UTF8
+} else {
+    $OutputEncoding = [System.Text.Encoding]::UTF8
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+}
+
+# Set CJK locale for proper Chinese/Japanese/Korean display
+try {
+    [System.Threading.Thread]::CurrentThread.CurrentUICulture = [System.Globalization.CultureInfo]::GetCultureInfo('zh-CN')
+} catch {
+    # Fallback to system default if zh-CN not available
+}
 
 $SCRIPT_URL  = 'https://cdn.longcat.chat/api-docs/codex-longcat-setup.ps1'
 $INSTALL_CMD = "irm $SCRIPT_URL | iex"

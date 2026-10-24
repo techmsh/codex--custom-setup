@@ -21,6 +21,14 @@
 # SOFTWARE.
 #
 
+# Set output encoding to match system locale for proper character display
+if ($PSVersionTable.PSVersion.Major -ge 7) {
+    [System.Text.Encoding]::GetEncoding('utf-8')
+} else {
+    $OutputEncoding = [System.Text.Encoding]::GetEncoding('utf-8')
+    [Console]::OutputEncoding = [System.Text.Encoding]::GetEncoding('utf-8')
+}
+
 <#
 Codex 自定义 Provider 配置管理器 (Windows)
 

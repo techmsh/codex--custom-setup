@@ -21,6 +21,14 @@
 # SOFTWARE.
 #
 
+# Set output encoding to match system locale for proper character display
+if ($PSVersionTable.PSVersion.Major -ge 7) {
+    [System.Text.Encoding]::GetEncoding('utf-8')
+} else {
+    $OutputEncoding = [System.Text.Encoding]::GetEncoding('utf-8')
+    [Console]::OutputEncoding = [System.Text.Encoding]::GetEncoding('utf-8')
+}
+
 <#
 Codex Kimi (Moonshot AI / 月之暗面) Setup -- configuration manager (Windows)
 

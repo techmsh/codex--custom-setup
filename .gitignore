@@ -1,1 +1,18 @@
-Created file D:\Mishu\Downloads\codex-setup-scripts\.gitignore
+# Rust build artifacts
+GUI/target/
+*.exe
+*.dll
+*.rlib
+*.rmeta
+
+# Git internal
+.git/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
