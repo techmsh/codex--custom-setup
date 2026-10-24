@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="bg-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0d1117;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#161b22;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="box-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#58a6ff;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#0969da;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="glow-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#58a6ff;stop-opacity:0.3" />
+      <stop offset="100%" style="stop-color:#0969da;stop-opacity:0" />
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background rounded square -->
+  <rect x="8" y="8" width="240" height="240" rx="48" ry="48" fill="url(#bg-grad)"/>
+
+  <!-- Subtle outer glow -->
+  <rect x="8" y="8" width="240" height="240" rx="48" ry="48" fill="none" stroke="url(#glow-grad)" stroke-width="4" filter="url(#glow)"/>
+
+  <!-- Main "C" shape (Codex) - stylized bracket -->
+  <path d="M 100 70 L 70 70 C 55 70 45 80 45 95 L 45 165 C 45 180 55 190 70 190 L 100 190" 
+        fill="none" stroke="url(#box-grad)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Code block / terminal lines -->
+  <rect x="120" y="100" width="80" height="8" rx="4" fill="#58a6ff" opacity="0.9"/>
+  <rect x="120" y="120" width="60" height="8" rx="4" fill="#58a6ff" opacity="0.6"/>
+  <rect x="120" y="140" width="70" height="8" rx="4" fill="#58a6ff" opacity="0.4"/>
+
+  <!-- Small "play" triangle / connect symbol -->
+  <circle cx="160" cy="165" r="12" fill="#58a6ff" opacity="0.2"/>
+  <polygon points="155,160 155,170 168,165" fill="#58a6ff"/>
+
+  <!-- Small dots decoration -->
+  <circle cx="85" cy="90" r="4" fill="#58a6ff" opacity="0.5"/>
+  <circle cx="85" cy="170" r="4" fill="#58a6ff" opacity="0.5"/>
+
+  <!-- Bottom subtle line -->
+  <line x1="60" y1="210" x2="200" y2="210" stroke="#30363d" stroke-width="2" stroke-linecap="round"/>
+</svg>

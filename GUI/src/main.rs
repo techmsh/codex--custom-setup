@@ -7,15 +7,21 @@
 // Windows: 隐藏控制台窗口（GUI 应用不显示 cmd 窗口）
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
+mod icon;
+
 use eframe::egui;
-use std::process::Command;
 use std::sync::mpsc;
 use std::thread;
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([700.0, 580.0]),
+            .with_inner_size([700.0, 580.0])
+            .with_icon(egui::IconData {
+                rgba: icon::icon_data(),
+                width: icon::icon_width(),
+                height: icon::icon_height(),
+            }),
         ..Default::default()
     };
 
