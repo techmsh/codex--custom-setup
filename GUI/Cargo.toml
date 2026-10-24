@@ -1,0 +1,14 @@
+[package]
+name = "codex-setup-gui"
+version = "1.0.0"
+edition = "2021"
+description = "Codex Setup GUI - 一键配置 Codex 适配各种大模型平台"
+license = "MIT"
+authors = ["msh (https://github.com/techmsh)"]
+
+[dependencies]
+eframe = "0.29"
+egui = "0.29"
+
+[package.metadata.winres]
+LegalCopyright = "Copyright (c) 2026 msh (https://github.com/techmsh)"
