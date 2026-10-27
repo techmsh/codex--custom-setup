@@ -15,6 +15,14 @@ codex-setup-scripts/
 │   ├── codex-kimi-setup.ps1
 │   ├── codex-minimax-setup.ps1
 │   ├── codex-qwen-setup.ps1
+│   ├── codex-openrouter-setup.ps1
+│   ├── codex-xai-setup.ps1
+│   ├── codex-fireworks-setup.ps1
+│   ├── codex-novita-setup.ps1
+│   ├── codex-huggingface-setup.ps1
+│   ├── codex-meta-setup.ps1
+│   ├── codex-stepfun-setup.ps1
+│   ├── codex-xiaomi-setup.ps1
 │   └── codex-custom-setup.ps1
 ├── Linux/                # Linux/macOS Bash 脚本
 │   └── codex-setup.sh    # 统一脚本（包含所有平台）
@@ -37,6 +45,14 @@ codex-setup-scripts/
 | Kimi (月之暗面) | `kimi` | `https://api.moonshot.cn/v1` | 8 |
 | MiniMax | `minimax` | `https://api.minimax.chat/v1` | 8 |
 | Qwen (通义千问) | `qwen` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | 16 |
+| OpenRouter | `openrouter` | `https://openrouter.ai/api/v1` | 12 |
+| xAI (Grok) | `xai` | `https://api.x.ai/v1` | 8 |
+| Fireworks AI | `fireworks` | `https://api.fireworks.ai/inference/v1` | 8 |
+| Novita AI | `novita` | `https://api.novita.ai/openai/v1` | 8 |
+| Hugging Face | `huggingface` | `https://router.huggingface.co/v1` | 7 |
+| Meta Model API | `meta` | `https://api.meta.ai/v1` | 6 |
+| StepFun | `stepfun` | `https://api.stepfun.ai/v1` | 2 |
+| Xiaomi MiMo | `xiaomi` | `https://api.xiaomimimo.com/v1` | 3 |
 | 自定义 | 用户定义 | 用户定义 | ∞ |
 
 ## 使用方式
@@ -56,11 +72,52 @@ cargo build --release
 
 ```powershell
 # 一键安装（推荐）
-irm https://raw.githubusercontent.com/techmsh/codex--custom-setup-main/Windows/codex-deepseek-setup.ps1 | iex
+irm https://raw.githubusercontent.com/techmsh/codex--custom-setup/main/Windows/codex-deepseek-setup.ps1 | iex
 
 # 或手动运行
 .\Windows\codex-deepseek-setup.ps1
 ```
+
+新增第三方平台均为独立脚本，每个命令只安装对应平台：
+
+```powershell
+# OpenRouter
+irm https://raw.githubusercontent.com/techmsh/codex--custom-setup/main/Windows/codex-openrouter-setup.ps1 | iex
+
+# xAI / Grok
+irm https://raw.githubusercontent.com/techmsh/codex--custom-setup/main/Windows/codex-xai-setup.ps1 | iex
+
+# Fireworks AI
+irm https://raw.githubusercontent.com/techmsh/codex--custom-setup/main/Windows/codex-fireworks-setup.ps1 | iex
+
+# Novita AI
+irm https://raw.githubusercontent.com/techmsh/codex--custom-setup/main/Windows/codex-novita-setup.ps1 | iex
+
+# Hugging Face
+irm https://raw.githubusercontent.com/techmsh/codex--custom-setup/main/Windows/codex-huggingface-setup.ps1 | iex
+
+# Meta Model API
+irm https://raw.githubusercontent.com/techmsh/codex--custom-setup/main/Windows/codex-meta-setup.ps1 | iex
+
+# StepFun
+irm https://raw.githubusercontent.com/techmsh/codex--custom-setup/main/Windows/codex-stepfun-setup.ps1 | iex
+
+# Xiaomi MiMo
+irm https://raw.githubusercontent.com/techmsh/codex--custom-setup/main/Windows/codex-xiaomi-setup.ps1 | iex
+```
+
+脚本会优先读取对应环境变量；未设置时会提示输入 API Key：
+
+| 平台 | 环境变量 |
+|------|----------|
+| OpenRouter | `OPENROUTER_API_KEY` |
+| xAI | `XAI_API_KEY` |
+| Fireworks AI | `FIREWORKS_API_KEY` |
+| Novita AI | `NOVITA_API_KEY` |
+| Hugging Face | `HF_TOKEN` |
+| Meta Model API | `META_MODEL_API_KEY` 或 `MODEL_API_KEY` |
+| StepFun | `STEPFUN_API_KEY` |
+| Xiaomi MiMo | `XIAOMI_API_KEY` |
 
 ### Linux/macOS (Bash)
 

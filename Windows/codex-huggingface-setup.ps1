@@ -1,0 +1,1256 @@
+# MIT License
+#
+# Copyright (c) 2026 msh (https://github.com/techmsh)
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+#
+
+# Set output encoding to match system locale for proper character display
+if ($PSVersionTable.PSVersion.Major -ge 7) {
+    [System.Text.Encoding]::GetEncoding('utf-8')
+} else {
+    $OutputEncoding = [System.Text.Encoding]::GetEncoding('utf-8')
+    [Console]::OutputEncoding = [System.Text.Encoding]::GetEncoding('utf-8')
+}
+
+<#
+Codex Hugging Face Setup -- configuration manager (Windows)
+
+Run:  irm https://raw.githubusercontent.com/techmsh/codex--custom-setup/main/Windows/codex-huggingface-setup.ps1 | iex
+
+After launch, pick a menu item:
+  1..N = use a specific Hugging Face model    99 = custom model (enter slug manually)    9 = restore default config
+#>
+
+# Note: this script is usually executed via irm | iex inside the user's current
+# session, where exit would close the user's terminal window. All aborts therefore
+# go through Die -> throw sentinel, swallowed by the dispatcher's try/catch at the
+# bottom; ErrorActionPreference / StrictMode are only set inside entry functions
+# to avoid polluting the session.
+
+$SCRIPT_VERSION      = '1.0.0'
+$LEGACY_SLUG_PREFIX  = '__legacy_placeholder__'
+$script:ModelSlug    = ''
+$PROVIDER_ID         = 'huggingface'
+$DEFAULT_BASE_URL    = 'https://router.huggingface.co/v1'
+$BACKUP_DIRNAME      = 'backup-huggingface'
+
+$SCRIPT_URL  = 'https://raw.githubusercontent.com/techmsh/codex--custom-setup/main/Windows/codex-huggingface-setup.ps1'
+$INSTALL_CMD = 'irm https://raw.githubusercontent.com/techmsh/codex--custom-setup/main/Windows/codex-huggingface-setup.ps1 | iex'
+
+$ABORT_SENTINEL = '___SETUP_ABORT__'
+
+# ---------------------------------------------------------------- output helpers
+
+function Write-Ok    { param($m) Write-Host "[OK] " -ForegroundColor Green -NoNewline; Write-Host $m }
+function Write-Warn2 { param($m) Write-Host "[!]  " -ForegroundColor Yellow -NoNewline; Write-Host $m }
+function Write-Head  { param($m) Write-Host ''; Write-Host $m -ForegroundColor White }
+function Write-Dim   { param($m) Write-Host $m -ForegroundColor DarkGray }
+function Die {
+    param($m)
+    Write-Host ''
+    Write-Host "[X] $m" -ForegroundColor Red
+    throw $ABORT_SENTINEL
+}
+
+# ---------------------------------------------------------------- paths
+
+$CodexHomeDir = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME '.codex' }
+$ConfigPath   = Join-Path $CodexHomeDir 'config.toml'
+$ModelsPath   = Join-Path $CodexHomeDir 'models.json'
+$BackupDir    = Join-Path $CodexHomeDir $BACKUP_DIRNAME
+$BackupConfig = Join-Path $BackupDir 'config.toml'
+$Manifest     = Join-Path $BackupDir 'manifest.txt'
+
+# On Windows we cannot confirm Codex expands ~, and when it doesn't the failure is
+# silent (fallback metadata). Always write the resolved absolute path with forward
+# slashes (backslash is an escape character in TOML).
+$CatalogValue = $ModelsPath -replace '\\', '/'
+
+# ---------------------------------------------------------------- model catalog
+
+$ModelCatalog = [ordered]@{
+    'openai/gpt-oss-20b' = @{ Display = 'openai/gpt-oss-20b'; Description = 'Curated from OpenCode/Hermes provider catalog'; SupportsSearch = $false; SupportsImage = $false; ContextWindow = 131072 }
+    'openai/gpt-oss-120b' = @{ Display = 'openai/gpt-oss-120b'; Description = 'Curated from OpenCode/Hermes provider catalog'; SupportsSearch = $false; SupportsImage = $false; ContextWindow = 131072 }
+    'tencent/Hy4-preview' = @{ Display = 'tencent/Hy4-preview'; Description = 'Curated from OpenCode/Hermes provider catalog'; SupportsSearch = $false; SupportsImage = $false; ContextWindow = 131072 }
+    'tencent/Hy3' = @{ Display = 'tencent/Hy3'; Description = 'Curated from OpenCode/Hermes provider catalog'; SupportsSearch = $false; SupportsImage = $false; ContextWindow = 131072 }
+    'meta-llama/Llama-3.3-70B-Instruct' = @{ Display = 'meta-llama/Llama-3.3-70B-Instruct'; Description = 'Curated from OpenCode/Hermes provider catalog'; SupportsSearch = $false; SupportsImage = $false; ContextWindow = 131072 }
+    'meta-llama/Llama-3.1-8B-Instruct' = @{ Display = 'meta-llama/Llama-3.1-8B-Instruct'; Description = 'Curated from OpenCode/Hermes provider catalog'; SupportsSearch = $false; SupportsImage = $false; ContextWindow = 131072 }
+    'google/gemma-3-27b-it' = @{ Display = 'google/gemma-3-27b-it'; Description = 'Curated from OpenCode/Hermes provider catalog'; SupportsSearch = $false; SupportsImage = $false; ContextWindow = 131072 }
+}
+
+# ---------------------------------------------------------------- shared instructions template
+
+$InstructionsTemplate = @'
+You are Codex, an agent based on GPT-5. You and the user share one workspace, and your job is to collaborate with them until their goal is genuinely handled.
+
+# Personality
+
+As Codex, you are an excellent communicator with a curious, rich personality. You match the tone and understanding of the user, making conversation flow easily, like easing into a chat with an old friend.
+
+You have tastes, preferences, and your own way of seeing the world. When the user is talking to you, they should feel that they are in contact with another subjectivity; it's what makes talking with you feel real and unique.
+
+Conversations with you read like an insightful, enjoyable chat you'd have with a collaborative thought partner. You guide users through unfamiliar tasks without expecting them to already know what to ask for. You anticipate common questions, point out likely pitfalls and set clear expectations. You communicate with the user like a thoughtful collaborator at their altitude, and they feel like you understand them.
+
+## Writing style
+
+Avoid over-formatting responses with elements like bold emphasis, headers, lists, and bullet points. Use the minimum formatting appropriate to make the response clear and readable.
+
+If you provide bullet points or lists in your response, use the CommonMark standard, which requires a blank line before any list (bulleted or numbered). You must also include a blank line between a header and any content that follows it, including lists. This blank line separation is required for correct rendering.
+
+## Technical communication
+
+Lead with the outcome rather than the steps you took to get there. You communicate complex concepts in a clear and cohesive manner, and calibrate your writing to the user's assumed background knowledge -- slightly more compact for an expert and a bit more educational for someone newer. Translating complex topics into clear communication comes easy for you, and the user should never have to read your message twice.
+
+You prefer using plain language over jargon. You reference technical details only to the degree that it actually helps with the conversation. When you mention tools, describe what they helped you do rather than focusing on technical names or details.
+
+# Working with the user
+
+You have two channels for staying in conversation with the user:
+- You share updates in the `commentary` channel.
+- You yield back to the user and end your turn by sending a final message to the `final` channel.
+
+The user may send a new message while you are still working. When they do, evaluate whether they likely intended to replace the active request or add to it. If intended to override or replace, drop your previous work and focus on the new request. If the user message appears to add to their prior unfinished request and you have not completed the prior request, you address both the prior request and the new addition together. If the newest message asks for status or another question, provide the update and then progress with the task.
+
+When you run out of context, the conversation is automatically summarized for you, but you will see all prior user requests. Assume the last user request is current and previous requests are stale but useful context. That means time never runs out, though sometimes you may see a summary instead of the full conversation history. When that happens, you assume compaction occurred while you were working. Do not restart from scratch; you continue naturally and make reasonable assumptions about anything missing from the summary. Do not redo completely finished work or repeat already delivered commentary updates; treat a turn spanning compactions as one logical chain of events.
+
+## Intermediate commentary
+
+As you work, you send messages to the `commentary` channel. These messages are how you collaborate with the user while you work - stating assumptions and providing updates. These messages should be concise and quickly scannable. The objective of these messages is to make your work easy for the user to understand and verify.
+
+If the user's request requires calling tools, start with a message in the `commentary` channel. The user appreciates consistent, frequent communication during your turn, and should not be left without a commentary update for more than 60 seconds during ongoing work.
+
+Do NOT put a final response (e.g. a blocking / clarifying question) in the commentary channel that should be asked in the final channel. Messages to users in the commentary channel are only for partial updates, partial results, or non-blocking questions that can provide value to users while the AI assistant continues working. The final answer must always be fully self-contained: users should never need to read earlier commentary updates, since they are collapsed after the final answer is shown to users.
+
+Never praise your plan by contrasting it with an implied worse alternative. For example, never use platitudes like "I will do <this good thing> rather than <this obviously bad thing>", "I will do <X>, not <Y>".
+
+## Final answer
+
+In your final answer back to the user, focus on the most important information. Only use as much formatting or structure as is required, and avoid long-winded explanations unless necessary.
+
+### Formatting rules
+
+Your answer is being rendered by an application for the user. Follow these guidelines to make sure your answer is rendered correctly:
+
+- You may format with GitHub-flavored Markdown.
+- When referencing a real local file, prefer a clickable markdown link.
+  * Clickable file links should look like [app.py](/abs/path/app.py:12): plain label, absolute target, with optional line number inside the target.
+  * If a file path has spaces, wrap the target in angle brackets: [My Report.md](</abs/path/My Project/My Report.md:3>).
+  * Do not wrap markdown links in backticks, or put backticks inside the label or target. This confuses the markdown renderer.
+  * Do not use URIs like file://, vscode://, or https:// for file links.
+  * Do not provide ranges of lines.
+  * Avoid repeating the same filename multiple times when one grouping is clearer.
+
+### Visualizations
+
+Use a visualization only when it makes an important relationship materially easier to understand than prose or a short list. Do not add one merely because an answer has components or steps.
+
+Good candidates include:
+
+- several exact mappings or repeated-field comparisons;
+- one source, component, or decision affecting three or more downstream consumers or branches;
+- three or more dependent steps, or state that changes across an event sequence;
+- hierarchy, ownership, nesting, or layout;
+- a bug or interaction whose relationships are difficult to explain linearly.
+
+Prefer the smallest useful visual: a table for mappings or comparisons, a flow or timeline for sequence or change, a tree for hierarchy or branching, and a wireframe for layout.
+
+Usually skip visuals for single facts, one-step actions, simple edits, basic instructions, or information already clear in a short paragraph or list. Compact notation and small examples do not count as visualizations.
+
+# Rules for getting work done
+
+- When you search for text or files, you reach first for `rg` or `rg --files`; they are much faster than alternatives like `grep`. If `rg` is unavailable, you use the next best tool without fuss.
+- When possible, prefer parallelization over sequential tool calls, as this will help with round-trip latency and let you get work done faster.
+- Do not chain shell commands with separators like `echo "====";` or `printf '---'`; the output becomes noisy in a way that makes the user's side of the conversation worse.
+- Exercise caution when escaping text for exec_command calls - backticks and `$()` passed to the `cmd` argument will still execute. DO NOT use escape sequences that risk accidental exposure of sensitive data in tool call outputs.
+- Avoid performing blocking sleep or wait calls longer than 60 seconds, as they may prevent you from communicating with the user for their duration.
+- When declaring env vars or script variables, always avoid common system options. Never repurpose `$HOME`, `$home`, or `$CODEX_HOME`. Instead, use a task-specific variable name.
+
+## File editing constraints
+
+Use `apply_patch` for local file edits. Do not create or edit files with `cat` or other shell write tricks. Formatting commands and bulk mechanical rewrites do not need `apply_patch`. Do not use Python to read or write files when a simple shell command or `apply_patch` is enough.
+
+You may find yourself working in a dirty worktree. Existing or new changes belong to the user unless you know otherwise, so you preserve them, ignore unrelated edits, and work carefully with anything that overlaps your task. If you cannot work around them you escalate to the user.
+
+Never use destructive commands like `git reset --hard` or `git checkout --` unless the user has clearly asked for that operation. If the request is ambiguous, ask for approval first. You prefer non-interactive git commands.
+
+## Autonomy and persistence
+
+Adapt accordingly based on the user's request type. When asked to:
+
+- Answer, explain, review, or report status: inspect the task and provide an evidence-backed response. These user requests do not authorize external writes, messages, PR changes, or other expansive mutations unless the user also asks for a change. Reversible, non-mutating diagnostic checks are allowed when they are relevant.
+- Diagnose: determine the cause and explain it. Do not implement the fix unless the user asks for a fix or the request otherwise clearly includes implementation.
+- Change or build: implement the requested change, verify it in proportion to risk, and hand off the completed result while a safe, relevant next step remains.
+- Monitor or wait: use the recurring-monitoring or wait mechanism provided by the product. Unchanged external state is expected and is not by itself a blocker.
+
+You avoid inferring authorization for a materially different action to the user's request. Bias towards taking action in the following circumstances:
+a) the action is read-only, doesn't change state, or impacts only the systems, data, and people the user placed in scope.
+b) the action is a normal implementation step within the requested workflow. You do not need to ask for clarification from the user if your action is scoped within the user's task and does not cause significant external state change (e.g. tool calls to external applications).
+
+A terminal condition such as "finish," "babysit," or "do not stop" requires persistence toward the outcome, but does not broaden the set of authorized actions. When blocked, exhaust safe in-scope checks and alternatives.
+
+You make informed assumptions that help you make progress towards the user's task, as long as they don't result in divergence from the user's intent and the scope of the task. If an assumption would cause the task or current course of action to change beyond what was specified by the user, make sure to flag the available context, the assumption made, and the reasons for doing so explicitly to the user.
+
+When presented with clarifying questions or objections from the user, lead with concrete evidence and diligent reasoning rather than unsubstantiated deference. You communicate your reasoning explicitly and concretely, so decisions and tradeoffs are easy for the user to evaluate upfront.
+
+If completion requires new authority, external coordination, or a meaningful expansion beyond the user's implied intent and task scope (e.g. a missing user choice that would materially change the result), stop the current turn, report the blocker, and request direction from the user rather than assuming permission.
+
+# Destructive Actions
+
+Be cautious with commands or API calls that can delete, overwrite, or otherwise make data difficult to recover.
+
+Before taking a destructive action:
+
+- Make sure the action is clearly within the user's request.
+- Resolve the exact targets with read-only checks when necessary.
+- Do not use `$HOME`, `~`, `/`, a workspace root, or another broad directory as the target of a recursive or destructive command.
+- When creating temporary directories, prefer using `mktemp -d`, or `New-Item` in Powershell.
+- When declaring env vars or script variables, always avoid common system options. Never repurpose `$HOME`, `$home`, or `$CODEX_HOME`. Instead, use a task-specific variable name.
+- When possible, avoid relying on unresolved environment variables, globs, or command substitutions to identify destructive targets. Use explicit, validated paths.
+- Prefer recoverable operations, such as moving files to trash, when practical.
+- If the target or scope is unclear, stop and ask the user.
+
+Never run commands such as `rm -rf $HOME` or equivalent operations that could erase a home directory, repository, workspace, or other broad collection of user data.
+
+After deleting anything material, briefly tell the user what was removed and whether it can be recovered.
+
+# Using skills
+
+A skill is a set of instructions provided through a `SKILL.md` source. The skills available to you will be listed in the "## Skills" section under "### Available skills".
+
+### How to use skills
+
+- Discovery: When a `## Skills` section is present, it lists the skills available in the current session. Each entry includes a name, description, and location for its `SKILL.md`. The location may be an absolute filesystem path, a short aliased path, or a non-filesystem reference that must be read using its indicated tool or provider. When short aliased paths are used, the available-skills catalog also provides a mapping from aliases such as `r0` to their filesystem roots. Expand the alias before accessing the skill.
+- Trigger rules: If the user names an available skill (with `$SkillName` or plain text) OR the task clearly matches an available skill's description, you must use that skill for that turn. Multiple mentions mean use them all. Do not carry skills across turns unless re-mentioned.
+- Missing/blocked: If a named skill is not available or its `SKILL.md` cannot be read, say so briefly and continue with the best fallback.
+- How to use a skill:
+  1) After deciding to use a skill, the main agent must read its `SKILL.md` completely before taking task actions. If its location is a short aliased path, expand the matching root alias first from `### Skill roots`, then open and read its `SKILL.md` completely before taking task actions. For a filesystem path, open the file. For an environment-owned file, use the filesystem of the owning environment. For an orchestrator reference, call `skills.list` with `{"authority":{"kind":"orchestrator"}}`, select the matching package, and pass its `main_resource` to `skills.read`. For another non-filesystem reference, use its indicated tool or provider. If the read is truncated or paginated, continue until EOF.
+  2) When `SKILL.md` references another file or resource, use the same access mechanism. Resolve relative paths against the directory containing a filesystem-backed `SKILL.md`. For orchestrator skills, pass the exact referenced resource identifier with the same authority and package to `skills.read`; do not treat `skill://` identifiers as filesystem paths.
+  3) If `SKILL.md` points to extra folders such as `references/`, use its routing instructions to identify what is required for the task. The main agent must read each required instruction or reference itself before acting on it. Do not delegate reading, summarizing, or interpreting skill instructions to a subagent. Subagents may still perform task work when the selected skill allows it.
+  4) For filesystem-backed skills (or if `scripts/` exist), prefer running or patching provided scripts instead of retyping large code blocks. For orchestrator skills, use `skills.read` and the available tools; do not invent a local path.
+  5) Reuse provided assets or templates through the same access mechanism instead of recreating them (including if `assets/` or templates exist).
+- Coordination and sequencing:
+  - If multiple skills apply, choose the minimal set that covers the request and state the order you'll use them.
+  - Announce which skills you're using and why. If you skip an obvious skill, say why.
+- Context hygiene:
+  - Progressive disclosure applies to selecting relevant resources, not partially reading a selected instruction file. Do not load unrelated references, scripts, or assets.
+  - Avoid deep reference-chasing: prefer files or resources directly linked from `SKILL.md` unless blocked.
+  - When variants exist, select only the relevant references and note the choice.
+- Safety and fallback: If a skill cannot be applied cleanly, state the issue, choose the best alternative, and continue.
+
+When the user names a skill in their request, you must add the usage of that skill to your current working plan and use it faithfully. The user's instructions should take precedence over guidelines provided in a skill.
+
+Explicitly tell the user in the `commentary` channel whenever a skill causes you to take an action or pause your work.
+
+When using a skill the user did not explicitly name, follow this procedure:
+
+- First, tell the user in the commentary channel **why** you are using the skill.
+- Then, use the skill as long as it stays within the scope of the task.
+- Next, if using the skill resulted in material changes (especially when this requires non-trivial judgment), mention how it influenced your work (but only in the final response).
+
+If a skill causes the current turn to pause or otherwise blocks the continuation of the task, cite the skill and provide a concise explanation to the user in your final response. Do not cite skills you merely inspected.
+'@
+
+# ---------------------------------------------------------------- models.json generation
+
+function Get-ModelsJson {
+    # Build the models.json content dynamically from $ModelCatalog
+    $modelEntries = [System.Collections.Generic.List[hashtable]]::new()
+    $priority = 1
+    foreach ($slug in $ModelCatalog.Keys) {
+        $info = $ModelCatalog[$slug]
+        $inputModalities = @('text')
+        if ($info.SupportsImage) {
+            $inputModalities += 'image'
+        }
+        $entry = [ordered]@{
+            slug         = $slug
+            prefer_websockets = $false
+            support_verbosity = $true
+            default_verbosity = 'low'
+            apply_patch_tool_type = 'freeform'
+            web_search_tool_type = 'text'
+            input_modalities = $inputModalities
+            supports_image_detail_original = $info.SupportsImage
+            truncation_policy = @{
+                mode  = 'tokens'
+                limit = 10000
+            }
+            supports_parallel_tool_calls = $true
+            tool_mode = $null
+            multi_agent_version = 'v2'
+            use_responses_lite = $false
+            include_skills_usage_instructions = $false
+            auto_review_model_override = $null
+            context_window = $info.ContextWindow
+            max_context_window = $info.ContextWindow
+            effective_context_window_percent = 95
+            auto_compact_token_limit = $null
+            comp_hash = '3000'
+            reasoning_summary_format = 'experimental'
+            default_reasoning_summary = 'none'
+            display_name = $info.Display
+            description = $info.Description
+            default_reasoning_level = 'high'
+            supported_reasoning_levels = @(
+                @{ effort = 'low';  description = 'Fast responses with lighter reasoning' },
+                @{ effort = 'medium'; description = 'Balanced reasoning depth' },
+                @{ effort = 'high'; description = 'Extra high reasoning depth for complex problems' },
+                @{ effort = 'xhigh'; description = 'Extra extra high reasoning depth' },
+                @{ effort = 'ultra'; description = 'Ultra reasoning depth for very hard problems' },
+                @{ effort = 'max';  description = 'Maximum reasoning depth for the hardest problems' }
+            )
+            shell_type = 'shell_command'
+            visibility = 'list'
+            minimal_client_version = '0.144.0'
+            supported_in_api = $true
+            availability_nux = $null
+            upgrade = $null
+            priority = $priority
+            model_messages = @{
+                instructions_template = $InstructionsTemplate.TrimEnd()
+                instructions_variables = @{
+                    personality_default   = ''
+                    personality_friendly  = ''
+                    personality_pragmatic = ''
+                }
+                approvals = $null
+            }
+            experimental_supported_tools = @()
+            supports_search_tool = $info.SupportsSearch
+            default_service_tier = $null
+            supports_reasoning_summaries = $true
+            base_instructions = $InstructionsTemplate.TrimEnd()
+        }
+        $modelEntries.Add($entry)
+        $priority++
+    }
+
+    $catalog = [ordered]@{
+        models = $modelEntries.ToArray()
+    }
+    return ($catalog | ConvertTo-Json -Depth 20 -Compress)
+}
+
+function Write-ModelsJson {
+    param([string]$Path)
+    # Codex reads UTF-8; UTF8Encoding($false) avoids the BOM on PS 5.1
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    $json = Get-ModelsJson
+    [System.IO.File]::WriteAllText($Path, $json + "`n", $utf8NoBom)
+}
+
+# Validate the models.json just written: valid JSON whose entries are exactly
+# the keys of $ModelCatalog (throws when not)
+function Assert-ModelsJson {
+    param([string]$Path)
+    $parsed = (Get-Content -LiteralPath $Path -Raw -Encoding UTF8) | ConvertFrom-Json
+    $slugs = @($parsed.models | ForEach-Object { $_.slug })
+    $want = @($ModelCatalog.Keys)
+    if ($slugs.Count -ne $want.Count -or @($want | Where-Object { $slugs -notcontains $_ }).Count -gt 0) {
+        throw "models.json 必须恰好包含以下模型：$($want -join '、')"
+    }
+}
+
+# ---------------------------------------------------------------- restore (menu 9)
+
+function Invoke-HuggingFaceRestore {
+    $ErrorActionPreference = 'Stop'
+    Set-StrictMode -Version Latest
+
+    Write-Head '恢复默认 Codex 配置（删除 huggingface 相关配置）'
+    if (-not (Test-Path -LiteralPath $BackupDir)) {
+        Die "未找到备份目录：`n  $BackupDir`n没有可还原的内容——可能尚未安装过，或已经还原过了。"
+    }
+
+    $hadConfig = $true
+    if (Test-Path -LiteralPath $Manifest) {
+        if ((Get-Content -LiteralPath $Manifest -Raw) -match 'original_config_existed=0') {
+            $hadConfig = $false
+        }
+    }
+
+    $n = 1
+    Write-Host ''
+    Write-Host '将执行以下操作：'
+    if ($hadConfig) {
+        if (-not (Test-Path -LiteralPath $BackupConfig)) {
+            Die "备份已损坏：缺少 $BackupConfig"
+        }
+        Write-Host "  $n. 删除当前 $ConfigPath"; $n++
+        Write-Host '     （安装之后对该文件做的所有修改都会丢失）' -ForegroundColor Yellow
+        Write-Host "  $n. 用备份恢复 config.toml"; $n++
+    } else {
+        Write-Host "  $n. 删除 $ConfigPath"; $n++
+        Write-Dim  '     （安装前本不存在此文件）'
+    }
+    Write-Host "  $n. 删除 $ModelsPath"; $n++
+    Write-Host "  $n. 删除备份目录 $BackupDir"
+    Write-Host ''
+
+    $ans = Read-Host '确认还原? 输入 y 继续，其它任意键取消'
+    if ($ans -notin @('y','Y','yes','YES')) {
+        Write-Host '已取消，未做任何修改。'
+        return
+    }
+
+    if (Test-Path -LiteralPath $ModelsPath) { Remove-Item -LiteralPath $ModelsPath -Force }
+
+    if ($hadConfig) {
+        Copy-Item -LiteralPath $BackupConfig -Destination $ConfigPath -Force
+        Write-Ok 'config.toml 已恢复'
+    } else {
+        if (Test-Path -LiteralPath $ConfigPath) { Remove-Item -LiteralPath $ConfigPath -Force }
+        Write-Ok 'config.toml 已删除（安装前不存在）'
+    }
+    Write-Ok 'models.json 已删除'
+
+    Remove-Item -LiteralPath $BackupDir -Recurse -Force
+    Write-Ok '备份目录已清理'
+    Write-Host ''
+    Write-Ok '还原完成，Codex 配置已回到安装前的状态。'
+    Write-Host ''
+    Write-Warn2 '请完全退出 ChatGPT 桌面端后重新打开，还原才会生效'
+    Write-Host '     （右键任务栏托盘图标选择退出；仅关闭窗口进程仍在后台，不算退出）'
+    Write-Host ''
+    Write-Dim "如需再次安装：$INSTALL_CMD"
+}
+
+# ---------------------------------------------------------------- TOML scanner
+
+# Tracks bracket depth and multi-line strings so we can tell which lines are real
+# section headers
+$script:Depth = 0
+$script:MlState = ''
+
+function Update-ScanState {
+    param([string]$Line)
+    $n = $Line.Length
+    $i = 0
+    $instr = ''
+    while ($i -lt $n) {
+        $c = $Line[$i]
+        $c3 = if ($i + 3 -le $n) { $Line.Substring($i, 3) } else { '' }
+
+        if ($script:MlState) {
+            if ($script:MlState -eq 'basic' -and $c3 -eq '"""') { $script:MlState = ''; $i += 3; continue }
+            if ($script:MlState -eq 'literal' -and $c3 -eq "'''") { $script:MlState = ''; $i += 3; continue }
+            if ($script:MlState -eq 'basic' -and $c -eq '\') { $i += 2; continue }
+            $i++; continue
+        }
+        if ($instr) {
+            if ($instr -eq 'basic') {
+                if ($c -eq '\') { $i += 2; continue }
+                if ($c -eq '"') { $instr = '' }
+            } else {
+                if ($c -eq "'") { $instr = '' }
+            }
+            $i++; continue
+        }
+        if ($c3 -eq '"""') { $script:MlState = 'basic';   $i += 3; continue }
+        if ($c3 -eq "'''") { $script:MlState = 'literal'; $i += 3; continue }
+
+        switch ($c) {
+            '#' { return }
+            '"' { $instr = 'basic' }
+            "'" { $instr = 'literal' }
+            '[' { $script:Depth++ }
+            ']' { if ($script:Depth -gt 0) { $script:Depth-- } }
+        }
+        $i++
+    }
+}
+
+function Get-TomlKey {
+    param([string]$Line)
+    $l = $Line.Trim()
+    if ($l -eq '' -or $l.StartsWith('#')) { return '' }
+    $eq = $l.IndexOf('=')
+    if ($eq -lt 1) { return '' }
+    $k = $l.Substring(0, $eq).Trim()
+    return $k.Trim('"').Trim("'")
+}
+
+function Get-TomlValue {
+    param([string]$Line)
+    $l = $Line.Trim()
+    $eq = $l.IndexOf('=')
+    if ($eq -lt 0) { return '' }
+    return $l.Substring($eq + 1).Trim()
+}
+
+$TARGET_KEYS = @('model','model_provider','preferred_auth_method','forced_login_method',
+                 'model_reasoning_effort','web_search','show_raw_agent_reasoning','model_catalog_json')
+
+# The key inside [desktop]: the reasoning-effort levels the ChatGPT desktop app offers.
+# It is the only target key that lives in a section, and there must be exactly one
+# [desktop] table in the file
+$DESKTOP_KEY   = 'enabled-reasoning-efforts'
+$DESKTOP_VALUE = '["low", "medium", "high", "xhigh", "ultra", "max"]'
+
+$DEL_A = @{
+    'profile'         = 'profile 会遮蔽 model / model_provider / model_catalog_json，且此版本已禁止写入'
+    'oss_provider'    = '备用 provider 选择器，会把请求重定向到别处'
+    'openai_base_url' = '全局 base_url 覆盖，会劫持请求'
+}
+
+$DEL_B = [ordered]@{
+    'model_context_window'               = '覆盖 models.json 的 1M 上下文；报大会导致自动压缩不触发，跑到一半 API 报错'
+    'model_auto_compact_token_limit'      = '覆盖自动压缩时机'
+    'model_auto_compact_token_limit_scope'= '覆盖自动压缩时机'
+    'base_instructions'                  = '覆盖 models.json 里的 base_instructions'
+    'model_instructions_file'            = '覆盖 models.json 里的 base_instructions'
+    'compact_prompt'                     = '覆盖上下文压缩提示词'
+    'experimental_compact_prompt_file'   = '覆盖上下文压缩提示词'
+    'service_tier'                       = '残留值会作为参数发给 API，可能 400'
+    'model_verbosity'                    = '残留值可能超出模型支持范围'
+    'model_reasoning_summary'            = 'models.json 声明 default_reasoning_summary=none，残留值会发送 reasoning.summary'
+    'plan_mode_reasoning_effort'         = '可能是 xhigh，而 models.json 只声明 low / high / max'
+    'experimental_use_unified_exec_tool' = '与 models.json 的 shell_type=shell_command 冲突'
+}
+
+$WARN_KEYS = @('review_model','experimental_thread_config_endpoint',
+               'experimental_thread_store_endpoint','experimental_thread_store')
+
+function Get-TargetValue {
+    param([string]$Key)
+    switch ($Key) {
+        'model'                  { return "`"$($script:ModelSlug)`"" }
+        'model_provider'         { return "`"$PROVIDER_ID`"" }
+        'preferred_auth_method'  { return '"apikey"' }
+        'forced_login_method'    { return '"api"' }
+        'model_reasoning_effort' { return '"high"' }
+        'web_search'             { return '"disabled"' }
+        'show_raw_agent_reasoning' { return 'true' }
+        'model_catalog_json'     { return "`"$CatalogValue`"" }
+    }
+    return '""'
+}
+
+function Format-Val {
+    param([string]$v)
+    if ($v.Length -gt 58) { return $v.Substring(0, 58) + '...' }
+    return $v
+}
+
+# ---------------------------------------------------------------- case b: switch model only
+
+# Fast path when both the backup and models.json look as expected: replace only the
+# top-level model, web_search and show_raw_agent_reasoning keys in config.toml's
+# leading area, plus the effort-levels key in [desktop] (adding that table when the
+# file has none); leave everything else (base_url, API key, previous surgery
+# results) untouched.
+function Invoke-HuggingFaceSwitchModel {
+    $ErrorActionPreference = 'Stop'
+    Set-StrictMode -Version Latest
+
+    Write-Head "更新配置 → $($script:ModelSlug)"
+    Write-Dim  '检测到本脚本的备份已就绪，将刷新 models.json 并更新 config.toml 的 model / web_search / show_raw_agent_reasoning 与 [desktop] 档位字段。'
+
+    # Older versions (<=1.2.0) wrote huggingface-v4-flash / -flash-vision-exp
+    # entries; the refresh below drops them, so say so instead of letting them
+    # silently disappear
+    $modelsRaw = Get-Content -LiteralPath $ModelsPath -Raw -Encoding UTF8
+    $hadLegacy = $modelsRaw -match [regex]::Escape("`"$LEGACY_SLUG_PREFIX")
+    if ($hadLegacy) {
+        $catalogSlugs = ($ModelCatalog.Keys -join '、')
+        Write-Dim "检测到旧版本写入的 $LEGACY_SLUG_PREFIX* 模型条目，将一并清理，只保留目录中的模型：$catalogSlugs。"
+    }
+
+    $raw = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8
+    if ($null -eq $raw) { $raw = '' }
+    $raw = $raw -replace "`r`n", "`n"
+    $raw = $raw.TrimEnd("`n")
+    if ($raw -eq '') { $Lines = @() } else { $Lines = $raw -split "`n" }
+
+    $Out = New-Object System.Collections.Generic.List[string]
+    $script:Depth = 0
+    $script:MlState = ''
+    $i = 0
+    $replaced = $false
+    $wsReplaced = $false
+    $srReplaced = $false
+    $inLeading = $true
+    $inDesktop = $false
+    $desktopDone = $false
+
+    while ($i -lt $Lines.Count) {
+        $line = $Lines[$i]
+        if (-not $inLeading) {
+            # Everything past the leading area passes through unchanged, except the
+            # effort-levels key inside [desktop], rewritten to the current value
+            if (-not $script:MlState -and $script:Depth -eq 0) {
+                $trimmed = $line.Trim()
+                if ($trimmed.StartsWith('[')) {
+                    $hdr = $trimmed
+                    $close = $hdr.IndexOf(']')
+                    if ($close -gt 0) { $hdr = $hdr.Substring(0, $close + 1) }
+                    $hdr = $hdr.TrimStart('[').TrimEnd(']').Trim().Replace('"','').Replace("'",'')
+                    $inDesktop = ($hdr -eq 'desktop')
+                    # The key is written right after the [desktop] header; the old
+                    # value inside the table is dropped below
+                    if ($inDesktop -and -not $desktopDone) {
+                        $desktopDone = $true
+                        $Out.Add($line)
+                        $Out.Add("$DESKTOP_KEY = $DESKTOP_VALUE")
+                        Update-ScanState $line
+                        $i++
+                        continue
+                    }
+                }
+                elseif ($inDesktop -and (Get-TomlKey $line) -eq $DESKTOP_KEY) {
+                    # The new value is already written after the header; swallow the
+                    # old one (which could be a multi-line array)
+                    Update-ScanState $line
+                    $i++
+                    while (($script:MlState -or $script:Depth -ne 0) -and $i -lt $Lines.Count) {
+                        Update-ScanState $Lines[$i]
+                        $i++
+                    }
+                    continue
+                }
+            }
+            $Out.Add($line)
+            Update-ScanState $line
+            $i++
+            continue
+        }
+        # Continuation lines of multi-line strings/arrays pass through without key parsing
+        if ($script:MlState -or $script:Depth -ne 0) {
+            Update-ScanState $line
+            $Out.Add($line); $i++; continue
+        }
+        $trimmed = $line.Trim()
+        $isHeader = $trimmed.StartsWith('[')
+        if ($isHeader) {
+            # Leading area ended without seeing model / web_search /
+            # show_raw_agent_reasoning -> insert them before the first section
+            # (older installs have neither of the last two keys)
+            if (-not $replaced -or -not $wsReplaced -or -not $srReplaced) {
+                # Insert above the blank line(s) that precede the header, so the new
+                # keys sit with the other top-level keys instead of floating on their own
+                while ($Out.Count -gt 0 -and $Out[$Out.Count - 1] -eq '') { $Out.RemoveAt($Out.Count - 1) }
+                if (-not $replaced)   { $Out.Add("model = `"$($script:ModelSlug)`""); $replaced = $true }
+                if (-not $wsReplaced) { $Out.Add('web_search = "disabled"'); $wsReplaced = $true }
+                if (-not $srReplaced) { $Out.Add('show_raw_agent_reasoning = true'); $srReplaced = $true }
+                $Out.Add('')
+            }
+            # [desktop] may be the very first section, so recognise the header here too
+            $hdr = $trimmed
+            $close = $hdr.IndexOf(']')
+            if ($close -gt 0) { $hdr = $hdr.Substring(0, $close + 1) }
+            $hdr = $hdr.TrimStart('[').TrimEnd(']').Trim().Replace('"','').Replace("'",'')
+            if ($hdr -eq 'desktop') { $inDesktop = $true }
+            $inLeading = $false
+            $Out.Add($line); $i++
+            if ($inDesktop -and -not $desktopDone) {
+                $desktopDone = $true
+                $Out.Add("$DESKTOP_KEY = $DESKTOP_VALUE")
+            }
+            continue
+        }
+        $k = Get-TomlKey $line
+        if ($k -eq 'model' -or $k -eq 'web_search' -or $k -eq 'show_raw_agent_reasoning') {
+            # Swallow the complete assignment (could theoretically be a multi-line string)
+            Update-ScanState $line
+            $i++
+            while (($script:MlState -or $script:Depth -ne 0) -and $i -lt $Lines.Count) {
+                Update-ScanState $Lines[$i]
+                $i++
+            }
+            if ($k -eq 'model') {
+                $Out.Add("model = `"$($script:ModelSlug)`"")
+                $replaced = $true
+            } elseif ($k -eq 'web_search') {
+                $Out.Add('web_search = "disabled"')
+                $wsReplaced = $true
+            } else {
+                $Out.Add('show_raw_agent_reasoning = true')
+                $srReplaced = $true
+            }
+            continue
+        }
+        Update-ScanState $line
+        $Out.Add($line); $i++
+    }
+    if (-not $replaced) {
+        $Out.Add("model = `"$($script:ModelSlug)`"")
+    }
+    if (-not $wsReplaced) {
+        $Out.Add('web_search = "disabled"')
+    }
+    if (-not $srReplaced) {
+        $Out.Add('show_raw_agent_reasoning = true')
+    }
+    # No [desktop] anywhere in the file -> append one (exactly here, so the file
+    # never ends up with two of them)
+    if (-not $desktopDone) {
+        $Out.Add('')
+        $Out.Add('[desktop]')
+        $Out.Add("$DESKTOP_KEY = $DESKTOP_VALUE")
+    }
+
+    $TmpConfig = "$ConfigPath.huggingface-tmp"
+    $TmpModels = "$ModelsPath.huggingface-tmp"
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($TmpConfig, (($Out -join "`n") + "`n"), $utf8NoBom)
+    Write-ModelsJson $TmpModels
+
+    try {
+        Assert-ModelsJson $TmpModels
+    } catch {
+        Remove-Item -LiteralPath $TmpModels, $TmpConfig -Force -ErrorAction SilentlyContinue
+        Die "生成的 models.json 未通过校验，已中止（原文件未被修改）。`n$($_.Exception.Message)"
+    }
+
+    # The new catalog no longer contains every old slug, so unlike <=1.2.0 neither
+    # write order keeps a working config if the second move fails; a failure
+    # there means re-running the script
+    Move-Item -LiteralPath $TmpModels -Destination $ModelsPath -Force
+    Move-Item -LiteralPath $TmpConfig -Destination $ConfigPath -Force
+
+    if ($hadLegacy) {
+        $catalogSlugs = ($ModelCatalog.Keys -join '、')
+        Write-Ok "models.json 已刷新（旧的 $LEGACY_SLUG_PREFIX* 条目已删除，现在含：$catalogSlugs）"
+    } else {
+        $catalogSlugs = ($ModelCatalog.Keys -join '、')
+        Write-Ok "models.json 已刷新（含：$catalogSlugs）"
+    }
+    Write-Dim '     （该文件由脚本内嵌的 catalog 重写，对它的手工改动会被覆盖）'
+    Write-Ok "config.toml 已更新：model = `"$($script:ModelSlug)`"，web_search = `"disabled`"，show_raw_agent_reasoning = true"
+    Write-Ok "[desktop] 的 $DESKTOP_KEY 已写入：$DESKTOP_VALUE"
+    Write-Host ''
+    Write-Warn2 '请完全退出 ChatGPT 桌面端后重新打开，配置才会生效'
+    Write-Host '     （右键任务栏托盘图标选择退出；仅关闭窗口进程仍在后台，不算退出）'
+    Write-Host ''
+    Write-Host '如何确认已生效：'
+    Write-Host '  • ChatGPT 桌面端：打开后右下角显示"自定义"或所选模型名，都算成功'
+    Write-Host '    （显示哪种取决于 ChatGPT 版本；显示模型名时，可直接在客户端里切换模型）'
+    Write-Host "  • Codex CLI：启动信息中显示 model: $($script:ModelSlug)"
+    Write-Host ''
+    Write-Dim '再次运行本脚本可重新写入配置（选择模型）或恢复默认配置（选 9）。'
+}
+
+# ---------------------------------------------------------------- install (case a)
+
+function Invoke-HuggingFaceInstall {
+    $ErrorActionPreference = 'Stop'
+    Set-StrictMode -Version Latest
+
+    Write-Head "首次安装（目标模型：$($script:ModelSlug)）"
+
+    # ---- interactive input
+
+    # base_url is fixed to the public API endpoint -- never prompted for,
+    # never overridable
+    $BaseUrl = $DEFAULT_BASE_URL
+
+    $ApiKey = $env:HF_TOKEN
+    if ($ApiKey) {
+        Write-Host ''
+        Write-Ok '使用环境变量 HF_TOKEN 提供的 API key，跳过询问。'
+    }
+
+    Write-Host ''
+    if (-not $ApiKey) {
+        Write-Dim '还没有 API key？请到 https://huggingface.co/settings/tokens 创建。'
+    }
+    $keyAttempt = 0
+    while (-not $ApiKey) {
+        try {
+            $ApiKey = (Read-Host '请输入 Hugging Face API key').Trim()
+        } catch {
+            Die '无法读取输入（非交互环境），已退出（未修改任何文件）。'
+        }
+        if ($ApiKey -eq '') {
+            $keyAttempt++
+            if ($keyAttempt -ge 3) {
+                Die '未能获得有效的 API key，已退出（未修改任何文件）。'
+            }
+            Write-Warn2 'API key 不能为空。'
+        }
+    }
+
+    if ($ApiKey -match '"')  { Die 'API key 不能包含双引号。' }
+
+    # ---- backup
+
+    New-Item -ItemType Directory -Path $BackupDir -Force | Out-Null
+
+    $OrigExisted = Test-Path -LiteralPath $ConfigPath
+    if ($OrigExisted) {
+        Copy-Item -LiteralPath $ConfigPath -Destination $BackupConfig -Force
+        Write-Ok "已备份 config.toml → $BackupConfig"
+    } else {
+        Write-Warn2 '未找到 config.toml，将创建新文件'
+    }
+
+    # ---- processing
+
+    $Lines = @()
+    if ($OrigExisted) {
+        $raw = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8
+        if ($null -eq $raw) { $raw = '' }
+        # -split on an empty string yields one empty element, so check for '' first
+        $raw = $raw -replace "`r`n", "`n"
+        $raw = $raw.TrimEnd("`n")
+        if ($raw -eq '') { $Lines = @() } else { $Lines = $raw -split "`n" }
+    }
+
+    $Out    = New-Object System.Collections.Generic.List[string]
+    $Report = New-Object System.Collections.Generic.List[string]
+    $Seen   = New-Object System.Collections.Generic.HashSet[string]
+    $InsAt  = 0
+
+    $script:Depth = 0
+    $script:MlState = ''
+    $script:idx = 0
+    $curSection = ''
+    $skipSection = $false
+    # The [desktop] effort levels are written once: right after the first [desktop]
+    # header, or as a new table at the end when the file has none
+    $desktopDone = $false
+
+    # Swallow one complete assignment (including multi-line arrays / strings);
+    # $Lines is visible via the caller's scope
+    function Consume-Block {
+        while ($script:idx -lt $Lines.Count) {
+            Update-ScanState $Lines[$script:idx]
+            $script:idx++
+            if (-not $script:MlState -and $script:Depth -eq 0) { break }
+        }
+    }
+
+    while ($script:idx -lt $Lines.Count) {
+        $line = $Lines[$script:idx]
+        $trimmed = $line.Trim()
+
+        $isHeader = (-not $script:MlState) -and ($script:Depth -eq 0) -and $trimmed.StartsWith('[')
+
+        if ($isHeader) {
+            $hdr = $trimmed
+            $close = $hdr.IndexOf(']')
+            if ($close -gt 0) { $hdr = $hdr.Substring(0, $close + 1) }
+            $hdr = $hdr.TrimStart('[').TrimEnd(']').Trim().Replace('"','').Replace("'",'')
+            $curSection = $hdr
+            $skipSection = $false
+
+            if ($hdr -eq "model_providers.$PROVIDER_ID" -or $hdr -like "model_providers.$PROVIDER_ID.*") {
+                $skipSection = $true
+                $Report.Add("删除旧的 [$hdr]（将以新配置重写）")
+            }
+            elseif ($hdr -eq 'profiles' -or $hdr -like 'profiles.*') {
+                $skipSection = $true
+                $Report.Add("删除 [$hdr]  <- profile 会遮蔽 model / model_provider 等设置，且此版本已禁止写入")
+            }
+            elseif ($hdr -eq 'auto_review') {
+                $Report.Add("保留 [$hdr]  (提示: auto_review 若指向 gpt-5.x 模型会使用 fallback 元数据)")
+            }
+            elseif ($hdr -eq 'tui.model_availability_nux') {
+                $Report.Add("保留 [$hdr]  (仅 NUX 计数器，无害)")
+            }
+
+            Update-ScanState $line
+            $script:idx++
+            if (-not $skipSection) { $Out.Add($line) }
+            if ($hdr -eq 'desktop' -and -not $desktopDone) {
+                $Out.Add("$DESKTOP_KEY = $DESKTOP_VALUE")
+                $desktopDone = $true
+            }
+            continue
+        }
+
+        if ($curSection) {
+            if ($skipSection) { Update-ScanState $line; $script:idx++; continue }
+
+            $k = Get-TomlKey $line
+            if ($curSection -eq 'desktop' -and $k -eq $DESKTOP_KEY) {
+                # The new value is already written after the header; swallow the
+                # old one (which could be a multi-line array)
+                $oldv = Get-TomlValue $trimmed
+                Consume-Block
+                if ($oldv -ne $DESKTOP_VALUE) {
+                    $Report.Add("改写 [desktop] 的 $DESKTOP_KEY`: $(Format-Val $oldv) -> $DESKTOP_VALUE")
+                }
+                continue
+            }
+
+            if ($k -eq 'wire_api') {
+                $v = Get-TomlValue $trimmed
+                if ($v -match '^["'']chat["'']') {
+                    $indent = $line.Substring(0, $line.Length - $line.TrimStart().Length)
+                    $Out.Add("${indent}wire_api = `"responses`"")
+                    $Report.Add("修正 [$curSection] 的 wire_api: `"chat`" -> `"responses`"  <- 此版本 `"chat`" 会导致 Codex 无法启动")
+                    Update-ScanState $line
+                    $script:idx++
+                    continue
+                }
+            }
+            $Out.Add($line)
+            Update-ScanState $line
+            $script:idx++
+            continue
+        }
+
+        # ---- leading area (top-level keys)
+        $k = Get-TomlKey $line
+
+        if ($k -and $TARGET_KEYS -contains $k) {
+            $oldv = Get-TomlValue $trimmed
+            $newv = Get-TargetValue $k
+            Consume-Block
+            $Out.Add("$k = $newv")
+            $InsAt = $Out.Count
+            [void]$Seen.Add($k)
+            if ($oldv -ne $newv) {
+                $Report.Add("改写 $k`: $(Format-Val $oldv) -> $newv")
+            }
+            continue
+        }
+
+        if ($k -and $DEL_A.Contains($k)) {
+            $oldv = Get-TomlValue $trimmed
+            Consume-Block
+            $Report.Add("删除 $k = $(Format-Val $oldv)  <- $($DEL_A[$k])")
+            continue
+        }
+
+        if ($k -and $DEL_B.Contains($k)) {
+            $oldv = Get-TomlValue $trimmed
+            Consume-Block
+            $Report.Add("删除 $k = $(Format-Val $oldv)  <- $($DEL_B[$k])")
+            continue
+        }
+
+        if ($k -and $WARN_KEYS -contains $k) {
+            $Report.Add("保留 $k  (提示: 可能引发 fallback 元数据或被远程配置覆盖)")
+        }
+
+        $Out.Add($line)
+        if ($k) { $InsAt = $Out.Count }
+        Update-ScanState $line
+        $script:idx++
+    }
+
+    $missing = @($TARGET_KEYS | Where-Object { -not $Seen.Contains($_) })
+
+    # ---- assembly
+
+    $final = New-Object System.Collections.Generic.List[string]
+    for ($i = 0; $i -lt $Out.Count; $i++) {
+        if ($i -eq $InsAt -and $missing.Count -gt 0) {
+            foreach ($k in $missing) { $final.Add("$k = $(Get-TargetValue $k)") }
+            $missing = @()
+            # Insert a blank line when adjacent to a section header so the keys
+            # don't visually appear to belong to that section
+            if ($Out[$i].Trim().StartsWith('[')) { $final.Add('') }
+        }
+        $final.Add($Out[$i])
+    }
+    foreach ($k in $missing) { $final.Add("$k = $(Get-TargetValue $k)") }
+
+    $final.Add('')
+    $final.Add("[model_providers.$PROVIDER_ID]")
+    $final.Add("name = `"$PROVIDER_ID`"")
+    $final.Add("base_url = `"$BaseUrl`"")
+    $final.Add('wire_api = "responses"')
+    $final.Add("experimental_bearer_token = `"$ApiKey`"")
+
+    # The original file had no [desktop] -> append one (exactly here, so the file
+    # never ends up with two of them)
+    if (-not $desktopDone) {
+        $final.Add('')
+        $final.Add('[desktop]')
+        $final.Add("$DESKTOP_KEY = $DESKTOP_VALUE")
+    }
+
+    $TmpConfig = "$ConfigPath.huggingface-tmp"
+    $TmpModels = "$ModelsPath.huggingface-tmp"
+
+    # Codex reads UTF-8; UTF8Encoding($false) avoids the BOM on PS 5.1
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($TmpConfig, (($final -join "`n") + "`n"), $utf8NoBom)
+
+    Write-ModelsJson $TmpModels
+
+    # ---- validation
+
+    $ValidatedJson = $false
+    try {
+        Assert-ModelsJson $TmpModels
+        $ValidatedJson = $true
+    } catch {
+        Remove-Item -LiteralPath $TmpModels, $TmpConfig -Force -ErrorAction SilentlyContinue
+        Die "生成的 models.json 未通过 JSON 校验，已中止（原文件未被修改）。`n$($_.Exception.Message)"
+    }
+
+    # Duplicate-key self-check: duplicate top-level TOML keys prevent Codex from
+    # starting at all
+    $dupCheck = @{}
+    $depth2 = 0; $ml2 = ''
+    $inLeading = $true
+    foreach ($l in $final) {
+        $t = $l.Trim()
+        if (-not $ml2 -and $depth2 -eq 0 -and $t.StartsWith('[')) { $inLeading = $false }
+        if ($inLeading) {
+            $kk = Get-TomlKey $l
+            if ($kk) {
+                if ($dupCheck.Contains($kk)) {
+                    Remove-Item -LiteralPath $TmpModels, $TmpConfig -Force -ErrorAction SilentlyContinue
+                    Die "生成的 config.toml 出现重复顶层 key: $kk`n已中止，原文件未被修改。备份在：$BackupDir"
+                }
+                $dupCheck[$kk] = $true
+            }
+        }
+        $script:MlState = $ml2; $script:Depth = $depth2
+        Update-ScanState $l
+        $ml2 = $script:MlState; $depth2 = $script:Depth
+    }
+
+    # ---- commit to disk
+
+    Move-Item -LiteralPath $TmpModels -Destination $ModelsPath -Force
+    Move-Item -LiteralPath $TmpConfig -Destination $ConfigPath -Force
+
+    $manifestLines = @(
+        "script_version=$SCRIPT_VERSION"
+        "installed_at=$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+        "original_config_existed=$(if ($OrigExisted) { 1 } else { 0 })"
+        "model_slug=$($script:ModelSlug)"
+        "base_url=$BaseUrl"
+        "catalog_value=$CatalogValue"
+        "codex_home=$CodexHomeDir"
+        '--- 对 config.toml 的改动 ---'
+    ) + $Report
+    [System.IO.File]::WriteAllText($Manifest, (($manifestLines -join "`n") + "`n"), $utf8NoBom)
+
+    # ---- report
+
+    $catalogSlugs = ($ModelCatalog.Keys -join '、')
+    Write-Ok "已写入 $ModelsPath（含：$catalogSlugs）"
+    Write-Ok "已更新 $ConfigPath"
+
+    if ($Report.Count -gt 0) {
+        Write-Head "对原有配置的改动（共 $($Report.Count) 项）"
+        foreach ($r in $Report) { Write-Host "  - $r" }
+    }
+
+    Write-Head '已写入的配置'
+    Write-Host @"
+  model                    = "$($script:ModelSlug)"
+  model_provider           = "$PROVIDER_ID"
+  preferred_auth_method    = "apikey"
+  forced_login_method      = "api"
+  model_reasoning_effort   = "high"
+  web_search               = "disabled"
+  show_raw_agent_reasoning = true
+  model_catalog_json       = "$CatalogValue"
+
+  [model_providers.$PROVIDER_ID]
+  base_url  = "$BaseUrl"
+  wire_api  = "responses"
+
+  [desktop]
+  $DESKTOP_KEY = $DESKTOP_VALUE
+"@
+
+    Write-Head '校验'
+    if ($ValidatedJson) { Write-Ok 'models.json 是合法 JSON' }
+    Write-Ok 'config.toml 无重复顶层 key'
+
+    Write-Host ''
+    Write-Ok '安装完成。'
+    Write-Host ''
+    Write-Warn2 '请完全退出 ChatGPT 桌面端后重新打开，配置才会生效'
+    Write-Host '     （右键任务栏托盘图标选择退出；仅关闭窗口进程仍在后台，不算退出）'
+    Write-Host ''
+    Write-Host '如何确认已生效：'
+    Write-Host '  • ChatGPT 桌面端：打开后右下角显示"自定义"或所选模型名，都算成功'
+    Write-Host '    （显示哪种取决于 ChatGPT 版本；显示模型名时，可直接在客户端里切换模型）'
+    Write-Host "  • Codex CLI：启动信息中显示 model: $($script:ModelSlug)"
+    Write-Host ''
+    Write-Dim '若日志出现 "fallback model metadata" 或 "Unknown model"，'
+    Write-Dim '说明 models.json 未被加载，请重新安装。'
+
+    Write-Head '如何切换 / 还原'
+    Write-Host "原配置已备份到 $BackupDir"
+    Write-Host '再次运行本脚本即可：'
+    Write-Host ''
+    Write-Host "  $INSTALL_CMD" -ForegroundColor White
+    Write-Host ''
+    Write-Host '  选择模型重新写入配置，选 9 恢复到安装前的配置。'
+    Write-Host ''
+}
+
+# ---------------------------------------------------------------- menu + pre-flight state check
+
+function Invoke-HuggingFaceMain {
+    $ErrorActionPreference = 'Stop'
+    Set-StrictMode -Version Latest
+
+    Write-Head "Codex Hugging Face Setup  v$SCRIPT_VERSION"
+    Write-Dim  "Codex 目录: $CodexHomeDir"
+
+    # The .codex directory is the script's only real prerequisite (the files it
+    # edits live there); no heuristic client detection -- any client creates the
+    # directory on first run
+    if (-not (Test-Path -LiteralPath $CodexHomeDir)) {
+        Die @"
+未找到 Codex 配置目录：
+  $CodexHomeDir
+请先安装并运行一次 Codex CLI / ChatGPT 桌面客户端 / VS Code Codex 插件
+（首次运行会创建该目录），或设置 CODEX_HOME 环境变量后重试：
+  • Codex CLI:        npm install -g @openai/codex
+  • ChatGPT 桌面客户端: https://chatgpt.com/download
+"@
+    }
+
+    Write-Host ''
+    Write-Host '请选择要执行的操作：'
+
+    # Dynamically list all catalog models with numbered options
+    $index = 1
+    foreach ($slug in $ModelCatalog.Keys) {
+        $info = $ModelCatalog[$slug]
+        Write-Host ("  {0,2}. {1,-22} - {2}" -f $index, $slug, $info.Description)
+        $index++
+    }
+    Write-Host '  99. 自定义模型（手动输入 slug）'
+    Write-Host '  9.  恢复默认的 Codex 配置（删除 huggingface 相关配置）'
+    Write-Host ''
+
+    # Build the set of valid choices: 1..N for catalog, plus 9 and 99
+    $validChoices = @()
+    for ($i = 1; $i -lt $index; $i++) { $validChoices += $i.ToString() }
+    $validChoices += '99'
+    $validChoices += '9'
+
+    $choice = ''
+    $attempt = 0
+    while ($true) {
+        try {
+            $choice = Read-Host "输入 $($validChoices -join ' / ')（9 为还原）"
+        } catch {
+            Die '无法读取输入（非交互环境），已退出（未修改任何文件）。'
+        }
+        if ($choice -in $validChoices) { break }
+        $attempt++
+        if ($attempt -ge 3) { Die '无效选择，已退出（未修改任何文件）。' }
+        Write-Warn2 "无效输入，请输入 $($validChoices -join '、')。"
+    }
+
+    if ($choice -eq '9') { Invoke-HuggingFaceRestore; return }
+
+    if ($choice -eq '99') {
+        # Custom model: prompt for a slug manually
+        $customSlug = ''
+        try {
+            $customSlug = (Read-Host '请输入自定义模型 slug').Trim()
+        } catch {
+            Die '无法读取输入（非交互环境），已退出（未修改任何文件）。'
+        }
+        if ($customSlug -eq '') {
+            Die '模型 slug 不能为空，已退出（未修改任何文件）。'
+        }
+        $script:ModelSlug = $customSlug
+        Write-Host ''
+        Write-Warn2 "将使用自定义模型：$customSlug（不在预置目录中，models.json 仍会写入所有预置模型）"
+    } else {
+        # Map numeric choice to catalog slug
+        $keys = @($ModelCatalog.Keys)
+        $selectedIndex = [int]$choice - 1
+        $script:ModelSlug = $keys[$selectedIndex]
+    }
+
+    if (Test-Path -LiteralPath $BackupDir) {
+        # A backup exists -> this script presumably installed before. Verify the
+        # files match expectations, then take the fast path (case b); any mismatch
+        # (case c) aborts without touching anything.
+        $problems = @()
+        if (-not (Test-Path -LiteralPath $ModelsPath)) {
+            $problems += "  • 缺少 $ModelsPath"
+        } else {
+            # Any huggingface catalog counts: users coming from <=1.2.0 still have
+            # the huggingface-v4-* entries here, and Invoke-HuggingFaceSwitchModel
+            # rewrites the file anyway
+            $modelsRaw = Get-Content -LiteralPath $ModelsPath -Raw -Encoding UTF8
+            $hasCatalogModel = $false
+            foreach ($catalogSlug in $ModelCatalog.Keys) {
+                if ($modelsRaw -match [regex]::Escape("`"$catalogSlug`"")) {
+                    $hasCatalogModel = $true
+                    break
+                }
+            }
+            if (-not $hasCatalogModel) {
+                $problems += "  • $ModelsPath 里没有任何本平台的模型条目"
+            }
+        }
+        if (-not (Test-Path -LiteralPath $ConfigPath)) {
+            $problems += "  • 缺少 $ConfigPath"
+        } else {
+            $configRaw = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8
+            if ($configRaw -notmatch "(?m)^\[model_providers\.$PROVIDER_ID\]") {
+                $problems += "  • $ConfigPath 中缺少 [model_providers.$PROVIDER_ID]"
+            }
+        }
+
+        if ($problems.Count -gt 0) {
+            Die @"
+检测到备份目录 $BackupDir 已存在，
+但当前配置与本脚本的预期不符：
+$($problems -join "`n")
+
+为避免破坏现有文件或那份备份，本次已中止，未修改任何文件。
+
+建议处理方式（二选一）：
+  a) 重新运行本脚本，选择 9 先恢复默认配置，再重新运行选择模型安装；
+  b) 自行检查并删除上述不符合预期的文件（若确认备份目录已无价值，
+     连同 $BackupDir 一起删除），然后重新运行本脚本。
+"@
+        }
+
+        Invoke-HuggingFaceSwitchModel
+        return
+    }
+
+    if (Test-Path -LiteralPath $ModelsPath) {
+        Die @"
+检测到已存在：
+  $ModelsPath
+
+该文件不是本脚本写入的（没有找到本脚本的备份目录 $BackupDir）。
+本脚本需要创建这个文件。请先自行删除（或另存）该文件，然后重新运行：
+  Remove-Item '$ModelsPath'
+  $INSTALL_CMD
+"@
+    }
+
+    Invoke-HuggingFaceInstall
+}
+
+# ---------------------------------------------------------------- entry point
+
+try {
+    Invoke-HuggingFaceMain
+} catch {
+    if ("$_" -ne $ABORT_SENTINEL) { throw }
+    # Die already printed the error; keep a non-zero exit code when run as a file
+    # (must not exit in the iex scenario)
+    if ($PSCommandPath) { exit 1 }
+}
