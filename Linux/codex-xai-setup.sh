@@ -2,22 +2,84 @@
 set -euo pipefail
 
 # ============================================
-# Codex Setup Scripts - Linux/macOS Unified
+# Codex xAI Setup - Linux/macOS
 # Version: 1.0.0
 # License: MIT
 # Copyright (c) 2026 msh (https://github.com/techmsh)
 #
-# A unified Bash script equivalent to the Windows PowerShell scripts.
-# Supports: DeepSeek, LongCat, GLM, Kimi, MiniMax, Qwen, and Custom.
-#
-# Usage: ./codex-setup.sh
+# Self-contained installer. Does not use Linux/lib/common.sh
+# or the unified Linux/codex-setup.sh.
 # ============================================
 
-SCRIPT_VERSION="1.0.0"
+export LANG="${LANG:-en_US.UTF-8}"
+export LC_ALL="${LC_ALL:-en_US.UTF-8}"
+
+PROVIDER_ID="xai"
+PROVIDER_BASE_URL_VALUE="https://api.x.ai/v1"
+PROVIDER_API_KEY_ENV_VAR="XAI_API_KEY"
+PROVIDER_API_KEY_ENV_VAR_ALT=""
+PROVIDER_KEY_URL="https://console.x.ai/"
+PROVIDER_KEY_PREFIX=""
+BACKUP_DIRNAME="backup-xai"
+
+MODELS_LIST="grok-4.7 grok-4.6 grok-4.5 grok-4.3 grok-build-0.1 grok-4.20-0309-reasoning grok-4.20-0309-non-reasoning grok-4.20-multi-agent-0309"
+
+declare -A MODEL_DISPLAY=(
+    [grok-4.7]='grok-4.7'
+    [grok-4.6]='grok-4.6'
+    [grok-4.5]='grok-4.5'
+    [grok-4.3]='grok-4.3'
+    [grok-build-0.1]='grok-build-0.1'
+    [grok-4.20-0309-reasoning]='grok-4.20-0309-reasoning'
+    [grok-4.20-0309-non-reasoning]='grok-4.20-0309-non-reasoning'
+    [grok-4.20-multi-agent-0309]='grok-4.20-multi-agent-0309'
+)
+
+declare -A MODEL_DESCRIPTION=(
+    [grok-4.7]='Curated from OpenCode/Hermes provider catalog'
+    [grok-4.6]='Curated from OpenCode/Hermes provider catalog'
+    [grok-4.5]='Curated from OpenCode/Hermes provider catalog'
+    [grok-4.3]='Curated from OpenCode/Hermes provider catalog'
+    [grok-build-0.1]='Curated from OpenCode/Hermes provider catalog'
+    [grok-4.20-0309-reasoning]='Curated from OpenCode/Hermes provider catalog'
+    [grok-4.20-0309-non-reasoning]='Curated from OpenCode/Hermes provider catalog'
+    [grok-4.20-multi-agent-0309]='Curated from OpenCode/Hermes provider catalog'
+)
+
+MODEL_SUPPORTS_IMAGE=""
+MODEL_SUPPORTS_SEARCH=""
+
+# ---------------------------------------------------------------- embedded common implementation
+
+# ============================================
+# Codex Setup Scripts - Linux/macOS Common Library
+# Version: 1.0.0
+# License: MIT
+# Copyright (c) 2026 msh (https://github.com/techmsh)
+#
+# Shared functions for all per-platform setup scripts.
+# Each platform script must define the following variables before sourcing
+# this library and calling main():
+#
+#   PROVIDER_ID              - provider identifier (e.g. "deepseek")
+#   PROVIDER_BASE_URL_VALUE  - base URL for the API endpoint
+#   PROVIDER_API_KEY_ENV_VAR - env var name for the API key (e.g. "DEEPSEEK_API_KEY")
+#   PROVIDER_API_KEY_ENV_VAR_ALT - alternative env var name (optional, "" if none)
+#   PROVIDER_KEY_URL         - URL where users can obtain an API key
+#   PROVIDER_KEY_PREFIX      - expected key prefix (e.g. "sk-"), "" if no prefix check
+#   BACKUP_DIRNAME           - backup directory name suffix (e.g. "deepseek")
+#   MODELS_LIST              - space-separated model slugs
+#   MODEL_DISPLAY            - associative array: slug -> display name
+#   MODEL_DESCRIPTION        - associative array: slug -> description
+#   MODEL_SUPPORTS_IMAGE     - space-separated slugs that support image input
+#   MODEL_SUPPORTS_SEARCH    - space-separated slugs that support web search
+# ============================================
 
 # Ensure UTF-8 encoding for Chinese / international character support
 export LANG="${LANG:-en_US.UTF-8}"
-export LC_ALL="${LC_ALL:-en_US.UTF-8"}
+export LC_ALL="${LC_ALL:-en_US.UTF-8}"
+
+SCRIPT_VERSION="1.0.0"
 
 # ---------------------------------------------------------------- color helpers
 
@@ -57,10 +119,10 @@ check_dependencies() {
     if command -v jq &>/dev/null; then
         HAS_JQ=1
     fi
-    if command -v python3 &>/dev/null; then
+    if command -v python3 &>/dev/null && python3 -c 'import json' &>/dev/null; then
         HAS_PYTHON=1
         PYTHON_BIN="python3"
-    elif command -v python &>/dev/null; then
+    elif command -v python &>/dev/null && python -c 'import json' &>/dev/null; then
         HAS_PYTHON=1
         PYTHON_BIN="python"
     fi
@@ -74,184 +136,6 @@ check_dependencies() {
         die "需要 Bash 4.3 或更高版本（当前: ${BASH_VERSION}）。请升级 Bash：brew install bash 或 apt install bash"
     fi
 }
-
-# ---------------------------------------------------------------- provider catalog definitions
-
-# Provider IDs, names, base URLs, and env var names for API keys
-declare -A PROVIDER_NAME=(
-    [deepseek]="DeepSeek"
-    [longcat]="LongCat (美团龙猫)"
-    [glm]="GLM (智谱 AI)"
-    [kimi]="Kimi (月之暗面)"
-    [minimax]="MiniMax"
-    [qwen]="Qwen (通义千问)"
-)
-
-declare -A PROVIDER_BASE_URL=(
-    [deepseek]="https://api.deepseek.com/"
-    [longcat]="https://api.longcat.chat/openai/v1/"
-    [glm]="https://open.bigmodel.cn/api/paas/v4"
-    [kimi]="https://api.moonshot.cn/v1"
-    [minimax]="https://api.minimax.chat/v1"
-    [qwen]="https://dashscope.aliyuncs.com/compatible-mode/v1"
-)
-
-declare -A PROVIDER_API_KEY_ENV=(
-    [deepseek]="DEEPSEEK_API_KEY"
-    [longcat]="LONGCAT_API_KEY"
-    [glm]="GLM_API_KEY"
-    [kimi]="MOONSHOT_API_KEY"
-    [minimax]="MINIMAX_API_KEY"
-    [qwen]="DASHSCOPE_API_KEY"
-)
-
-# Alternative env vars (fallback)
-declare -A PROVIDER_API_KEY_ENV_ALT=(
-    [glm]="ZHIPU_API_KEY"
-)
-
-# Model catalogs per provider (space-separated slugs)
-MODELS_DEEPSEEK="deepseek-chat deepseek-reasoner deepseek-coder deepseek-v3 deepseek-r1 deepseek-flash deepseek-v4-pro"
-MODELS_LONGCAT="LongCat-2.0 LongCat-2.5-Preview LongCat-Flash LongCat-OmniFlash"
-MODELS_GLM="glm-5.3 glm-5.3-flash glm-5.3-turbo glm-5.2 glm-5.1 glm-4.6 glm-4.6v glm-4.5 glm-4.5v glm-4.5-air glm-4.5-flash glm-4v-plus"
-MODELS_KIMI="kimi-k3.1-pro kimi-k3.1-pro-highspeed kimi-k2.5-pro kimi-k2.5-pro-highspeed kimi-k2.5 kimi-k2.5-flash kimi-latest kimi-2.6"
-MODELS_MINIMAX="MiniMax-M3.1 abab7.5-chat abab7.5s-chat abab6.5s-chat abab6.5-chat abab6.5t-chat abab6.5g-chat abab5.5-chat"
-MODELS_QWEN="qwen-max qwen-max-longcontext qwen-plus qwen-turbo qwen-vl-max qwen-vl-plus qwen2.5-72b-instruct qwen2.5-32b-instruct qwen2.5-14b-instruct qwen2.5-7b-instruct qwen2.5-3b-instruct qwen2.5-1.5b-instruct qwen2.5-0.5b-instruct qwen2.5-coder-32b-instruct qwen2.5-coder-14b-instruct qwen2.5-coder-7b-instruct"
-
-# Display names per model (slug -> display_name, description)
-declare -A MODEL_DISPLAY=(
-    # DeepSeek
-    [deepseek-chat]="DeepSeek-Chat"
-    [deepseek-reasoner]="DeepSeek-Reasoner"
-    [deepseek-coder]="DeepSeek-Coder"
-    [deepseek-v3]="DeepSeek-V3"
-    [deepseek-r1]="DeepSeek-R1"
-    [deepseek-flash]="DeepSeek-Flash"
-    [deepseek-v4-pro]="DeepSeek-V4-Pro"
-    # LongCat
-    [LongCat-2.0]="LongCat-2.0"
-    [LongCat-2.5-Preview]="LongCat-2.5-Preview"
-    [LongCat-Flash]="LongCat-Flash"
-    [LongCat-OmniFlash]="LongCat-OmniFlash"
-    # GLM
-    [glm-5.3]="GLM-5.3"
-    [glm-5.3-flash]="GLM-5.3-Flash"
-    [glm-5.3-turbo]="GLM-5.3-Turbo"
-    [glm-5.2]="GLM-5.2"
-    [glm-5.1]="GLM-5.1"
-    [glm-4.6]="GLM-4.6"
-    [glm-4.6v]="GLM-4.6V"
-    [glm-4.5]="GLM-4.5"
-    [glm-4.5v]="GLM-4.5V"
-    [glm-4.5-air]="GLM-4.5-Air"
-    [glm-4.5-flash]="GLM-4.5-Flash"
-    [glm-4v-plus]="GLM-4V-Plus"
-    # Kimi
-    [kimi-k3.1-pro]="Kimi-K3.1-Pro"
-    [kimi-k3.1-pro-highspeed]="Kimi-K3.1-Pro-Highspeed"
-    [kimi-k2.5-pro]="Kimi-K2.5-Pro"
-    [kimi-k2.5-pro-highspeed]="Kimi-K2.5-Pro-Highspeed"
-    [kimi-k2.5]="Kimi-K2.5"
-    [kimi-k2.5-flash]="Kimi-K2.5-Flash"
-    [kimi-latest]="Kimi-Latest"
-    [kimi-2.6]="Kimi-2.6"
-    # MiniMax
-    [MiniMax-M3.1]="MiniMax-M3.1"
-    [abab7.5-chat]="ABAB7.5-Chat"
-    [abab7.5s-chat]="ABAB7.5s-Chat"
-    [abab6.5s-chat]="ABAB6.5s-Chat"
-    [abab6.5-chat]="ABAB6.5-Chat"
-    [abab6.5t-chat]="ABAB6.5t-Chat"
-    [abab6.5g-chat]="ABAB6.5g-Chat"
-    [abab5.5-chat]="ABAB5.5-Chat"
-    # Qwen
-    [qwen-max]="Qwen-Max"
-    [qwen-max-longcontext]="Qwen-Max-LongContext"
-    [qwen-plus]="Qwen-Plus"
-    [qwen-turbo]="Qwen-Turbo"
-    [qwen-vl-max]="Qwen-VL-Max"
-    [qwen-vl-plus]="Qwen-VL-Plus"
-    [qwen2.5-72b-instruct]="Qwen2.5-72B-Instruct"
-    [qwen2.5-32b-instruct]="Qwen2.5-32B-Instruct"
-    [qwen2.5-14b-instruct]="Qwen2.5-14B-Instruct"
-    [qwen2.5-7b-instruct]="Qwen2.5-7B-Instruct"
-    [qwen2.5-3b-instruct]="Qwen2.5-3B-Instruct"
-    [qwen2.5-1.5b-instruct]="Qwen2.5-1.5B-Instruct"
-    [qwen2.5-0.5b-instruct]="Qwen2.5-0.5B-Instruct"
-    [qwen2.5-coder-32b-instruct]="Qwen2.5-Coder-32B-Instruct"
-    [qwen2.5-coder-14b-instruct]="Qwen2.5-Coder-14B-Instruct"
-    [qwen2.5-coder-7b-instruct]="Qwen2.5-Coder-7B-Instruct"
-)
-
-declare -A MODEL_DESCRIPTION=(
-    # DeepSeek
-    [deepseek-chat]="General-purpose chat model"
-    [deepseek-reasoner]="Advanced reasoning model"
-    [deepseek-coder]="Code-specialized model"
-    [deepseek-v3]="Latest V3 model"
-    [deepseek-r1]="Reasoning-optimized R1 model"
-    [deepseek-flash]="Fast frontier agentic coding model"
-    [deepseek-v4-pro]="Most capable frontier agentic coding model"
-    # LongCat
-    [LongCat-2.0]="LongCat 2.0 base model"
-    [LongCat-2.5-Preview]="LongCat 2.5 preview model"
-    [LongCat-Flash]="LongCat Flash fast model"
-    [LongCat-OmniFlash]="LongCat OmniFlash multimodal model"
-    # GLM
-    [glm-5.3]="GLM 5.3 flagship model"
-    [glm-5.3-flash]="GLM 5.3 flash fast model"
-    [glm-5.3-turbo]="GLM 5.3 turbo model"
-    [glm-5.2]="GLM 5.2 model"
-    [glm-5.1]="GLM 5.1 model"
-    [glm-4.6]="GLM 4.6 model"
-    [glm-4.6v]="GLM 4.6V vision model"
-    [glm-4.5]="GLM 4.5 model"
-    [glm-4.5v]="GLM 4.5V vision model"
-    [glm-4.5-air]="GLM 4.5 Air lightweight model"
-    [glm-4.5-flash]="GLM 4.5 Flash free model"
-    [glm-4v-plus]="GLM 4V Plus vision model"
-    # Kimi
-    [kimi-k3.1-pro]="Kimi K3.1 Pro model"
-    [kimi-k3.1-pro-highspeed]="Kimi K3.1 Pro high-speed model"
-    [kimi-k2.5-pro]="Kimi K2.5 Pro model"
-    [kimi-k2.5-pro-highspeed]="Kimi K2.5 Pro high-speed model"
-    [kimi-k2.5]="Kimi K2.5 base model"
-    [kimi-k2.5-flash]="Kimi K2.5 Flash model"
-    [kimi-latest]="Kimi latest model"
-    [kimi-2.6]="Kimi 2.6 model"
-    # MiniMax
-    [MiniMax-M3.1]="MiniMax M3.1 model"
-    [abab7.5-chat]="ABAB 7.5 chat model"
-    [abab7.5s-chat]="ABAB 7.5s chat model"
-    [abab6.5s-chat]="ABAB 6.5s chat model"
-    [abab6.5-chat]="ABAB 6.5 chat model"
-    [abab6.5t-chat]="ABAB 6.5T chat model"
-    [abab6.5g-chat]="ABAB 6.5G chat model"
-    [abab5.5-chat]="ABAB 5.5 chat model"
-    # Qwen
-    [qwen-max]="Qwen Max flagship model"
-    [qwen-max-longcontext]="Qwen Max long context model"
-    [qwen-plus]="Qwen Plus model"
-    [qwen-turbo]="Qwen Turbo fast model"
-    [qwen-vl-max]="Qwen VL Max vision model"
-    [qwen-vl-plus]="Qwen VL Plus vision model"
-    [qwen2.5-72b-instruct]="Qwen 2.5 72B instruct model"
-    [qwen2.5-32b-instruct]="Qwen 2.5 32B instruct model"
-    [qwen2.5-14b-instruct]="Qwen 2.5 14B instruct model"
-    [qwen2.5-7b-instruct]="Qwen 2.5 7B instruct model"
-    [qwen2.5-3b-instruct]="Qwen 2.5 3B instruct model"
-    [qwen2.5-1.5b-instruct]="Qwen 2.5 1.5B instruct model"
-    [qwen2.5-0.5b-instruct]="Qwen 2.5 0.5B instruct model"
-    [qwen2.5-coder-32b-instruct]="Qwen 2.5 Coder 32B instruct model"
-    [qwen2.5-coder-14b-instruct]="Qwen 2.5 Coder 14B instruct model"
-    [qwen2.5-coder-7b-instruct]="Qwen 2.5 Coder 7B instruct model"
-)
-
-# Models that support image input
-MODEL_SUPPORTS_IMAGE="deepseek-flash"
-
-# Models that support web search
-MODEL_SUPPORTS_SEARCH="deepseek-chat deepseek-reasoner deepseek-coder deepseek-v3 deepseek-r1 deepseek-flash deepseek-v4-pro"
 
 # ---------------------------------------------------------------- shared instructions template
 
@@ -403,7 +287,7 @@ A skill is a set of instructions provided through a `SKILL.md` source. The skill
   4) For filesystem-backed skills (or if `scripts/` exist), prefer running or patching provided scripts instead of retyping large code blocks. For orchestrator skills, use `skills.read` and the available tools; do not invent a local path.
   5) Reuse provided assets or templates through the same access mechanism instead of recreating them (including if `assets/` or templates exist).
 - Coordination and sequencing:
-  - If multiple skills apply, choose the minimal set that covers the request and state the order you will use them.
+  - If multiple skills apply, choose the minimal set that covers the request and state the order to use them.
   - Announce which skills you are using and why. If you skip an obvious skill, say why.
 - Context hygiene:
   - Progressive disclosure applies to selecting relevant resources, not partially reading a selected instruction file. Do not load unrelated references, scripts, or assets.
@@ -428,31 +312,16 @@ If a skill causes the current turn to pause or otherwise blocks the continuation
 CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
 CONFIG_PATH="$CODEX_HOME/config.toml"
 MODELS_PATH="$CODEX_HOME/models.json"
-PROVIDER_ID=""
-PROVIDER_BASE_URL_VALUE=""
 API_KEY=""
 MODEL_SLUG=""
-MODELS_LIST=""
 
 set_paths() {
-    BACKUP_DIR="$CODEX_HOME/backup-$PROVIDER_ID"
+    BACKUP_DIR="$CODEX_HOME/$BACKUP_DIRNAME"
     BACKUP_CONFIG="$BACKUP_DIR/config.toml"
     MANIFEST="$BACKUP_DIR/manifest.txt"
 }
 
 # ---------------------------------------------------------------- JSON generation functions
-
-get_model_catalog_var() {
-    case "$PROVIDER_ID" in
-        deepseek) echo "MODELS_DEEPSEEK" ;;
-        longcat)  echo "MODELS_LONGCAT" ;;
-        glm)      echo "MODELS_GLM" ;;
-        kimi)     echo "MODELS_KIMI" ;;
-        minimax)  echo "MODELS_MINIMAX" ;;
-        qwen)     echo "MODELS_QWEN" ;;
-        *)        echo "" ;;
-    esac
-}
 
 model_supports_image() {
     local slug="$1"
@@ -472,13 +341,10 @@ model_supports_search() {
 
 # Generate models.json using jq
 generate_models_json_jq() {
-    local catalog_var
-    catalog_var=$(get_model_catalog_var)
-    local -n models_ref="$catalog_var"
     local priority=1
     local entries=""
 
-    for slug in $models_ref; do
+    for slug in $MODELS_LIST; do
         local display="${MODEL_DISPLAY[$slug]:-$slug}"
         local desc="${MODEL_DESCRIPTION[$slug]:-Model $slug}"
         local context_window=1048576
@@ -495,9 +361,140 @@ generate_models_json_jq() {
             supports_image_detail="true"
         fi
 
-        # Escape the instructions template for JSON embedding
-        local escaped_instructions
-        escaped_instructions=$(echo "$INSTRUCTIONS_TEMPLATE" | jq -Rs .)
+        local entry
+        entry=$(jq -n \
+            --arg slug "$slug" \
+            --arg display "$display" \
+            --arg desc "$desc" \
+            --argjson context_window "$context_window" \
+            --argjson input_modalities "$input_modalities" \
+            --argjson supports_image_detail "$supports_image_detail" \
+            --argjson supports_search "$supports_search" \
+            --argjson priority "$priority" \
+            --arg instructions "$INSTRUCTIONS_TEMPLATE" \
+            '{
+                slug: $slug,
+                prefer_websockets: false,
+                support_verbosity: true,
+                default_verbosity: "low",
+                apply_patch_tool_type: "freeform",
+                web_search_tool_type: "text",
+                input_modalities: $input_modalities,
+                supports_image_detail_original: $supports_image_detail,
+                truncation_policy: {
+                    mode: "tokens",
+                    limit: 10000
+                },
+                supports_parallel_tool_calls: true,
+                tool_mode: null,
+                multi_agent_version: "v2",
+                use_responses_lite: false,
+                include_skills_usage_instructions: false,
+                auto_review_model_override: null,
+                context_window: $context_window,
+                max_context_window: $context_window,
+                effective_context_window_percent: 95,
+                auto_compact_token_limit: null,
+                comp_hash: "3000",
+                reasoning_summary_format: "experimental",
+                default_reasoning_summary: "none",
+                display_name: $display,
+                description: $desc,
+                default_reasoning_level: "high",
+                supported_reasoning_levels: [
+                    {effort: "low", description: "Fast responses with lighter reasoning"},
+                    {effort: "medium", description: "Balanced reasoning depth"},
+                    {effort: "high", description: "Extra high reasoning depth for complex problems"},
+                    {effort: "xhigh", description: "Extra extra high reasoning depth"},
+                    {effort: "ultra", description: "Ultra reasoning depth for very hard problems"},
+                    {effort: "max", description: "Maximum reasoning depth for the hardest problems"}
+                ],
+                shell_type: "shell_command",
+                visibility: "list",
+                minimal_client_version: "0.144.0",
+                supported_in_api: true,
+                availability_nux: null,
+                upgrade: null,
+                priority: $priority,
+                model_messages: {
+                    instructions_template: $instructions,
+                    instructions_variables: {
+                        personality_default: "",
+                        personality_friendly: "",
+                        personality_pragmatic: ""
+                    },
+                    approvals: null
+                },
+                experimental_supported_tools: [],
+                supports_search_tool: $supports_search,
+                default_service_tier: null,
+                supports_reasoning_summaries: true,
+                base_instructions: $instructions
+            }')
+
+        if [[ -n "$entries" ]]; then
+            entries="$entries,"
+        fi
+        entries="$entries$entry"
+        priority=$((priority + 1))
+    done
+
+    jq -n --argjson models "[$entries]" '{models: $models}'
+}
+
+# ---------------------------------------------------------------- paths
+
+CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
+CONFIG_PATH="$CODEX_HOME/config.toml"
+MODELS_PATH="$CODEX_HOME/models.json"
+API_KEY=""
+MODEL_SLUG=""
+
+set_paths() {
+    BACKUP_DIR="$CODEX_HOME/$BACKUP_DIRNAME"
+    BACKUP_CONFIG="$BACKUP_DIR/config.toml"
+    MANIFEST="$BACKUP_DIR/manifest.txt"
+}
+
+# ---------------------------------------------------------------- JSON generation functions
+
+model_supports_image() {
+    local slug="$1"
+    case " $MODEL_SUPPORTS_IMAGE " in
+        *" $slug "*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+model_supports_search() {
+    local slug="$1"
+    case " $MODEL_SUPPORTS_SEARCH " in
+        *" $slug "*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Generate models.json using jq
+generate_models_json_jq() {
+    local priority=1
+    local entries=""
+
+    for slug in $MODELS_LIST; do
+        local display="${MODEL_DISPLAY[$slug]:-$slug}"
+        local desc="${MODEL_DESCRIPTION[$slug]:-Model $slug}"
+        local context_window=1048576
+        local input_modalities='["text"]'
+        if model_supports_image "$slug"; then
+            input_modalities='["text","image"]'
+        fi
+        local supports_search="false"
+        if model_supports_search "$slug"; then
+            supports_search="true"
+        fi
+        local supports_image_detail="false"
+        if model_supports_image "$slug"; then
+            supports_image_detail="true"
+        fi
 
         local entry
         entry=$(jq -n \
@@ -582,7 +579,6 @@ generate_models_json_jq() {
 
 # Generate models.json using Python
 generate_models_json_python() {
-    # Write model metadata to a temp JSON file for Python to consume
     local meta_tmp
     meta_tmp=$(mktemp)
     {
@@ -705,13 +701,10 @@ print(json.dumps({"models": models}, indent=2, ensure_ascii=False))
 
 # Generate models.json manually (fallback, no jq/python)
 generate_models_json_manual() {
-    local catalog_var
-    catalog_var=$(get_model_catalog_var)
-    local -n models_ref="$catalog_var"
     local priority=1
     local entries=""
 
-    for slug in $models_ref; do
+    for slug in $MODELS_LIST; do
         local display="${MODEL_DISPLAY[$slug]:-$slug}"
         local desc="${MODEL_DESCRIPTION[$slug]:-Model $slug}"
         local input_modalities
@@ -782,7 +775,7 @@ generate_models_json_manual() {
     "instructions_variables": {
       "personality_default": "",
       "personality_friendly": "",
-      "pragmatic": ""
+      "personality_pragmatic": ""
     },
     "approvals": null
   },
@@ -843,7 +836,6 @@ get_target_value() {
 }
 
 # Parse TOML and rewrite config
-# Uses a simplified line-by-line parser
 process_toml_install() {
     local input_file="$1"
     local output_file="$2"
@@ -925,7 +917,6 @@ process_toml_install() {
 
                 # Handle desktop enabled-reasoning-efforts
                 if [[ "$cur_section" == "desktop" && "$key" == "enabled-reasoning-efforts" && $desktop_done -eq 1 ]]; then
-                    # Skip the old value (already written after header)
                     idx=$((idx + 1))
                     continue
                 fi
@@ -937,7 +928,7 @@ process_toml_install() {
                     if [[ "$value" == '"chat"' ]]; then
                         local indent="${line%%[^[:space:]]*}"
                         out_lines+=("${indent}wire_api = \"responses\"")
-                        report+=("修正 [$curSection] 的 wire_api: \"chat\" -> \"responses\"  <- 此版本 \"chat\" 会导致 Codex 无法启动")
+                        report+=("修正 [$cur_section] 的 wire_api: \"chat\" -> \"responses\"  <- 此版本 \"chat\" 会导致 Codex 无法启动")
                         idx=$((idx + 1))
                         continue
                     fi
@@ -1174,14 +1165,9 @@ do_install() {
 
     # ---- interactive input
 
-    # base_url is fixed (except custom, which sets it beforehand)
-    if [[ -z "$PROVIDER_BASE_URL_VALUE" ]]; then
-        PROVIDER_BASE_URL_VALUE="${PROVIDER_BASE_URL[$PROVIDER_ID]:-}"
-    fi
-
     # API key
-    local env_var="${PROVIDER_API_KEY_ENV[$PROVIDER_ID]}"
-    local env_var_alt="${PROVIDER_API_KEY_ENV_ALT[$PROVIDER_ID]:-}"
+    local env_var="$PROVIDER_API_KEY_ENV_VAR"
+    local env_var_alt="${PROVIDER_API_KEY_ENV_VAR_ALT:-}"
 
     if [[ -n "${!env_var:-}" ]]; then
         API_KEY="${!env_var}"
@@ -1195,23 +1181,18 @@ do_install() {
 
     echo ''
     if [[ -z "$API_KEY" ]]; then
-        local key_url=""
-        case "$PROVIDER_ID" in
-            deepseek) key_url="https://platform.deepseek.com/api_keys" ;;
-            longcat)  key_url="https://longcat.chat/platform/api_keys" ;;
-            glm)      key_url="https://open.bigmodel.cn/usercenter/apikeys" ;;
-            kimi)     key_url="https://platform.moonshot.cn/console/api-keys" ;;
-            minimax)  key_url="https://api.minimax.chat/user-center/basic-information/interface-key" ;;
-            qwen)     key_url="https://dashscope.console.aliyun.com/apiKey" ;;
-        esac
-        if [[ -n "$key_url" ]]; then
-            write_dim "还没有 API key？请到 $key_url 创建。"
+        if [[ -n "$PROVIDER_KEY_URL" ]]; then
+            write_dim "还没有 API key？请到 $PROVIDER_KEY_URL 创建。"
         fi
     fi
 
     local key_attempt=0
     while [[ -z "$API_KEY" ]]; do
-        read -rp "请输入 API key: " API_KEY
+        local prompt_text="请输入 API key"
+        if [[ -n "$PROVIDER_KEY_PREFIX" ]]; then
+            prompt_text="请输入 API key（以 ${PROVIDER_KEY_PREFIX} 开头）"
+        fi
+        read -rp "$prompt_text: " API_KEY
         API_KEY="${API_KEY// /}"
         if [[ -z "$API_KEY" ]]; then
             key_attempt=$((key_attempt + 1))
@@ -1219,6 +1200,14 @@ do_install() {
                 die "未能获得有效的 API key，已退出（未修改任何文件）。"
             fi
             write_warn "API key 不能为空。"
+        fi
+        if [[ -n "$PROVIDER_KEY_PREFIX" && ! "$API_KEY" == ${PROVIDER_KEY_PREFIX}* ]]; then
+            key_attempt=$((key_attempt + 1))
+            if [[ $key_attempt -ge 3 ]]; then
+                die "未能获得有效的 API key（需以 ${PROVIDER_KEY_PREFIX} 开头），已退出（未修改任何文件）。"
+            fi
+            write_warn "API key 必须以 ${PROVIDER_KEY_PREFIX} 开头。"
+            API_KEY=""
         fi
     done
 
@@ -1467,14 +1456,10 @@ do_switch_model() {
 # ---------------------------------------------------------------- menu + pre-flight state check
 
 show_model_menu() {
-    local catalog_var
-    catalog_var=$(get_model_catalog_var)
-    local -n models_ref="$catalog_var"
-
     echo ''
     local idx=1
     local -a slug_array=()
-    for slug in $models_ref; do
+    for slug in $MODELS_LIST; do
         local desc="${MODEL_DESCRIPTION[$slug]:-}"
         printf "  %2d. %-26s - %s\n" "$idx" "$slug" "$desc"
         slug_array+=("$slug")
@@ -1523,83 +1508,6 @@ show_model_menu() {
     return 0
 }
 
-show_provider_menu() {
-    echo ''
-    echo "============================================"
-    echo "  Codex Setup Scripts - Linux/macOS v${SCRIPT_VERSION}"
-    echo "============================================"
-    echo ''
-    echo "请选择 AI 平台："
-    echo "  1. DeepSeek"
-    echo "  2. LongCat (美团龙猫)"
-    echo "  3. GLM (智谱 AI)"
-    echo "  4. Kimi (月之暗面)"
-    echo "  5. MiniMax"
-    echo "  6. Qwen (通义千问)"
-    echo "  7. Custom (自定义)"
-    echo "  9. Restore default config (恢复默认)"
-    echo ''
-
-    local choice=""
-    read -rp "输入 1-7 或 9: " choice
-
-    case "$choice" in
-        1) PROVIDER_ID="deepseek" ;;
-        2) PROVIDER_ID="longcat" ;;
-        3) PROVIDER_ID="glm" ;;
-        4) PROVIDER_ID="kimi" ;;
-        5) PROVIDER_ID="minimax" ;;
-        6) PROVIDER_ID="qwen" ;;
-        7) PROVIDER_ID="custom" ;;
-        9) PROVIDER_ID="__restore__" ;;
-        *) die "无效选择，已退出。" ;;
-    esac
-}
-
-handle_custom_provider() {
-    echo ''
-    echo "--- 自定义 Provider 配置 ---"
-    read -rp "请输入 Provider ID（如 myprovider）: " PROVIDER_ID
-    if [[ -z "$PROVIDER_ID" ]]; then
-        die "Provider ID 不能为空，已退出。"
-    fi
-    read -rp "请输入 Base URL（如 https://api.example.com/v1）: " PROVIDER_BASE_URL_VALUE
-    if [[ -z "$PROVIDER_BASE_URL_VALUE" ]]; then
-        die "Base URL 不能为空，已退出。"
-    fi
-    read -rp "请输入 API Key（或设置环境变量后留空）: " API_KEY
-
-    # Set empty models list for custom
-    MODELS_LIST=""
-
-    # Show model selection for custom
-    echo ''
-    echo "自定义 Provider - 选择模型："
-    echo "  1. 使用单一模型 slug"
-    echo "  2. 跳过（仅配置 provider，不生成 models.json）"
-    echo ''
-    local mchoice=""
-    read -rp "输入 1 或 2: " mchoice
-    case "$mchoice" in
-        1)
-            read -rp "请输入模型 slug: " MODEL_SLUG
-            if [[ -z "$MODEL_SLUG" ]]; then
-                die "模型 slug 不能为空，已退出。"
-            fi
-            # Create a single-model list
-            MODELS_LIST="$MODEL_SLUG"
-            MODEL_DISPLAY["$MODEL_SLUG"]="$MODEL_SLUG"
-            MODEL_DESCRIPTION["$MODEL_SLUG"]="Custom model $MODEL_SLUG"
-            ;;
-        2)
-            MODEL_SLUG="custom"
-            write_warn "将仅配置 config.toml，不生成 models.json"
-            ;;
-        *)
-            die "无效选择，已退出。" ;;
-    esac
-}
-
 preflight_check() {
     # Check CODEX_HOME exists
     if [[ ! -d "$CODEX_HOME" ]]; then
@@ -1607,64 +1515,18 @@ preflight_check() {
     fi
 }
 
-# ---------------------------------------------------------------- main
+# ---------------------------------------------------------------- main dispatcher
 
 main() {
     check_dependencies
 
-    show_provider_menu
+    # Show provider-specific header
+    write_head "Codex ${PROVIDER_ID^} Setup  v${SCRIPT_VERSION}"
+    write_dim "Codex 目录: $CODEX_HOME"
 
-    # Handle restore (need to know which provider to restore)
-    if [[ "$PROVIDER_ID" == "__restore__" ]]; then
-        echo ''
-        echo "选择要恢复的 Provider："
-        echo "  1. DeepSeek    2. LongCat    3. GLM    4. Kimi"
-        echo "  5. MiniMax     6. Qwen"
-        echo ''
-        local rchoice=""
-        read -rp "输入 1-6: " rchoice
-        case "$rchoice" in
-            1) PROVIDER_ID="deepseek" ;;
-            2) PROVIDER_ID="longcat" ;;
-            3) PROVIDER_ID="glm" ;;
-            4) PROVIDER_ID="kimi" ;;
-            5) PROVIDER_ID="minimax" ;;
-            6) PROVIDER_ID="qwen" ;;
-            *) die "无效选择，已退出。" ;;
-        esac
-        set_paths
-        do_restore
-        exit 0
-    fi
-
-    # Handle custom provider
-    if [[ "$PROVIDER_ID" == "custom" ]]; then
-        handle_custom_provider
-        set_paths
-        preflight_check
-
-        if [[ -n "$MODELS_LIST" ]]; then
-            do_install
-        else
-            # Just configure TOML without models.json
-            do_backup
-            local tmp_config="${CONFIG_PATH}.${PROVIDER_ID}-tmp"
-            process_toml_install "$CONFIG_PATH" "$tmp_config"
-            mv -f "$tmp_config" "$CONFIG_PATH"
-            write_ok "config.toml 已更新（自定义 Provider，无 models.json）"
-        fi
-        exit 0
-    fi
-
-    # Set models list for the selected provider
-    local catalog_var
-    catalog_var=$(get_model_catalog_var)
-    if [[ -n "$catalog_var" ]]; then
-        MODELS_LIST="${!catalog_var:-}"
-    fi
+    preflight_check
 
     set_paths
-    preflight_check
 
     # Show model selection menu
     if ! show_model_menu; then
@@ -1704,6 +1566,7 @@ main() {
 
     do_install
 }
+
 
 # ---------------------------------------------------------------- entry point
 

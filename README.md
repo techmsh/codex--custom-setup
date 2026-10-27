@@ -25,7 +25,7 @@ codex-setup-scripts/
 │   ├── codex-xiaomi-setup.ps1
 │   └── codex-custom-setup.ps1
 ├── Linux/                # Linux/macOS Bash 脚本
-│   └── codex-setup.sh    # 统一脚本（包含所有平台）
+│   └── codex-*-setup.sh  # 各平台独立脚本
 ├── GUI/                  # Rust 图形化程序
 │   ├── Cargo.toml
 │   ├── src/main.rs       # 源码
@@ -122,11 +122,29 @@ irm https://raw.githubusercontent.com/techmsh/codex--custom-setup/main/Windows/c
 ### Linux/macOS (Bash)
 
 ```bash
-# 赋予执行权限
-chmod +x Linux/codex-setup.sh
+# OpenRouter
+curl -fsSL https://raw.githubusercontent.com/techmsh/codex--custom-setup/main/Linux/codex-openrouter-setup.sh | bash
 
-# 运行
-./Linux/codex-setup.sh
+# xAI / Grok
+curl -fsSL https://raw.githubusercontent.com/techmsh/codex--custom-setup/main/Linux/codex-xai-setup.sh | bash
+
+# Fireworks AI
+curl -fsSL https://raw.githubusercontent.com/techmsh/codex--custom-setup/main/Linux/codex-fireworks-setup.sh | bash
+
+# Novita AI
+curl -fsSL https://raw.githubusercontent.com/techmsh/codex--custom-setup/main/Linux/codex-novita-setup.sh | bash
+
+# Hugging Face
+curl -fsSL https://raw.githubusercontent.com/techmsh/codex--custom-setup/main/Linux/codex-huggingface-setup.sh | bash
+
+# Meta Model API
+curl -fsSL https://raw.githubusercontent.com/techmsh/codex--custom-setup/main/Linux/codex-meta-setup.sh | bash
+
+# StepFun
+curl -fsSL https://raw.githubusercontent.com/techmsh/codex--custom-setup/main/Linux/codex-stepfun-setup.sh | bash
+
+# Xiaomi MiMo
+curl -fsSL https://raw.githubusercontent.com/techmsh/codex--custom-setup/main/Linux/codex-xiaomi-setup.sh | bash
 ```
 
 ## 功能

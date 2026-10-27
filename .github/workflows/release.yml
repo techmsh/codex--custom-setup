@@ -148,8 +148,8 @@ jobs:
 
             ### 包含内容
             - GUI 程序（Rust + egui）
-            - Windows PowerShell 脚本（7 个平台）
-            - Linux/macOS Bash 脚本（7 个平台 + 公共库）
+            - Windows PowerShell 脚本（15 个平台）
+            - Linux/macOS Bash 脚本（15 个平台）
             - LICENSE 和 README
           files: |
             artifacts/codex-setup-gui-windows.zip

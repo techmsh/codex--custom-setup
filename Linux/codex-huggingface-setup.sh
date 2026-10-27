@@ -1,4 +1,54 @@
 #!/bin/bash
+set -euo pipefail
+
+# ============================================
+# Codex Hugging Face Setup - Linux/macOS
+# Version: 1.0.0
+# License: MIT
+# Copyright (c) 2026 msh (https://github.com/techmsh)
+#
+# Self-contained installer. Does not use Linux/lib/common.sh
+# or the unified Linux/codex-setup.sh.
+# ============================================
+
+export LANG="${LANG:-en_US.UTF-8}"
+export LC_ALL="${LC_ALL:-en_US.UTF-8}"
+
+PROVIDER_ID="huggingface"
+PROVIDER_BASE_URL_VALUE="https://router.huggingface.co/v1"
+PROVIDER_API_KEY_ENV_VAR="HF_TOKEN"
+PROVIDER_API_KEY_ENV_VAR_ALT=""
+PROVIDER_KEY_URL="https://huggingface.co/settings/tokens"
+PROVIDER_KEY_PREFIX=""
+BACKUP_DIRNAME="backup-huggingface"
+
+MODELS_LIST="openai/gpt-oss-20b openai/gpt-oss-120b tencent/Hy4-preview tencent/Hy3 meta-llama/Llama-3.3-70B-Instruct meta-llama/Llama-3.1-8B-Instruct google/gemma-3-27b-it"
+
+declare -A MODEL_DISPLAY=(
+    [openai/gpt-oss-20b]='openai/gpt-oss-20b'
+    [openai/gpt-oss-120b]='openai/gpt-oss-120b'
+    [tencent/Hy4-preview]='tencent/Hy4-preview'
+    [tencent/Hy3]='tencent/Hy3'
+    [meta-llama/Llama-3.3-70B-Instruct]='meta-llama/Llama-3.3-70B-Instruct'
+    [meta-llama/Llama-3.1-8B-Instruct]='meta-llama/Llama-3.1-8B-Instruct'
+    [google/gemma-3-27b-it]='google/gemma-3-27b-it'
+)
+
+declare -A MODEL_DESCRIPTION=(
+    [openai/gpt-oss-20b]='Curated from OpenCode/Hermes provider catalog'
+    [openai/gpt-oss-120b]='Curated from OpenCode/Hermes provider catalog'
+    [tencent/Hy4-preview]='Curated from OpenCode/Hermes provider catalog'
+    [tencent/Hy3]='Curated from OpenCode/Hermes provider catalog'
+    [meta-llama/Llama-3.3-70B-Instruct]='Curated from OpenCode/Hermes provider catalog'
+    [meta-llama/Llama-3.1-8B-Instruct]='Curated from OpenCode/Hermes provider catalog'
+    [google/gemma-3-27b-it]='Curated from OpenCode/Hermes provider catalog'
+)
+
+MODEL_SUPPORTS_IMAGE=""
+MODEL_SUPPORTS_SEARCH=""
+
+# ---------------------------------------------------------------- embedded common implementation
+
 # ============================================
 # Codex Setup Scripts - Linux/macOS Common Library
 # Version: 1.0.0
@@ -67,10 +117,10 @@ check_dependencies() {
     if command -v jq &>/dev/null; then
         HAS_JQ=1
     fi
-    if command -v python3 &>/dev/null; then
+    if command -v python3 &>/dev/null && python3 -c 'import json' &>/dev/null; then
         HAS_PYTHON=1
         PYTHON_BIN="python3"
-    elif command -v python &>/dev/null; then
+    elif command -v python &>/dev/null && python -c 'import json' &>/dev/null; then
         HAS_PYTHON=1
         PYTHON_BIN="python"
     fi
@@ -1514,3 +1564,8 @@ main() {
 
     do_install
 }
+
+
+# ---------------------------------------------------------------- entry point
+
+main "$@"

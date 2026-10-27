@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>对话更新记录</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 32px 18px;
+      background: #f5f7fa;
+      color: #263238;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      line-height: 1.65;
+    }
+    main { max-width: 880px; margin: 0 auto; }
+    header {
+      padding: 28px 32px;
+      border-radius: 14px 14px 0 0;
+      background: linear-gradient(135deg, #0067c0, #004e92);
+      color: white;
+    }
+    h1 { margin: 0 0 8px; font-size: 24px; }
+    h2 { margin: 0 0 12px; font-size: 18px; }
+    section {
+      padding: 26px 32px;
+      background: white;
+      border: 1px solid #e3e8ef;
+      border-top: 0;
+    }
+    section:last-child { border-radius: 0 0 14px 14px; }
+    .meta { opacity: .86; font-size: 14px; }
+    .summary { margin: 0; }
+    .change {
+      margin: 12px 0;
+      padding: 14px 16px;
+      border: 1px solid #e3e8ef;
+      border-radius: 9px;
+      background: #fbfcfe;
+    }
+    code {
+      padding: 2px 6px;
+      border-radius: 5px;
+      background: #eef2f6;
+      font-family: Consolas, "SFMono-Regular", monospace;
+    }
+    footer { margin-top: 20px; text-align: center; color: #7b8794; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>对话更新记录</h1>
+      <div class="meta">生成时间：2026-10-27 23:12:23（Asia/Shanghai） · 项目路径：D:\Open Source-programming\Open Source-programming\codex-setup-scripts</div>
+    </header>
+    <section>
+      <h2>更新摘要</h2>
+      <p class="summary">补齐 Linux 侧 8 个第三方平台独立安装脚本，并将原有 7 个 Linux 脚本改为自包含实现。Linux 与 Windows 现在都各有 15 个独立平台脚本，不再依赖统一入口或公共库。</p>
+    </section>
+    <section>
+      <h2>变更详情</h2>
+      <div class="change">
+        <strong>新增 Linux 独立脚本</strong><br>
+        新增 OpenRouter、xAI、Fireworks AI、Novita AI、Hugging Face、Meta Model API、StepFun、Xiaomi MiMo 共 8 个脚本。每个脚本完整内嵌安装、备份、模型切换和还原逻辑。
+      </div>
+      <div class="change">
+        <strong>原有 Linux 脚本改为自包含</strong><br>
+        将 custom、DeepSeek、GLM、Kimi、LongCat、MiniMax、Qwen 共 7 个脚本中的公共实现直接嵌入各自文件，删除对 <code>Linux/lib/common.sh</code> 的依赖。
+      </div>
+      <div class="change">
+        <strong>移除共享 Linux 入口</strong><br>
+        <code>Linux/codex-setup.sh</code> 与 <code>Linux/lib/common.sh</code> 保持删除，不再作为安装前置条件。
+      </div>
+      <div class="change">
+        <strong>文档与发布说明</strong><br>
+        README 增加 8 个 Linux 一键命令，并把平台说明同步为 15 个；发布工作流同步更新平台数量。
+      </div>
+      <div class="change">
+        <strong>验证</strong><br>
+        全部 Linux 脚本通过 <code>bash -n</code>；8 个新平台和旧 DeepSeek 脚本通过临时 CODEX_HOME 安装测试；OpenRouter 还原流程通过。未调用真实模型 API。
+      </div>
+    </section>
+  </main>
+  <footer>由 Codex 根据本次对话生成</footer>
+</body>
+</html>
